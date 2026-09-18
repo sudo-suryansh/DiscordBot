@@ -1,0 +1,18 @@
+# Secrets
+.env
+
+# Runtime data (warnings/config get created automatically — don't commit)
+data/
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Editor/OS junk
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
