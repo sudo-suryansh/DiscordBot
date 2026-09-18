@@ -25,6 +25,7 @@ INITIAL_EXTENSIONS = [
     "cogs.utility",
     "cogs.admin",
     "cogs.help",
+    "cogs.power",
 ]
 
 
