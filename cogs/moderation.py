@@ -1,4 +1,3 @@
-import os
 import datetime
 import discord
 from discord import app_commands
@@ -7,25 +6,32 @@ from discord.ext import commands
 from utils.storage import add_warning, get_warnings, clear_warnings
 from utils.config import get_guild_config
 from utils.checks import is_mod
-
-MOD_LOG_CHANNEL_ID = os.getenv("MOD_LOG_CHANNEL_ID")
+from utils.channels import get_channel
 
 
 class Moderation(commands.Cog):
     """Core moderation commands: kick, mute, warn, clear, lock, slowmode.
     Works as both !command and /command (hybrid commands).
     Restricted to real Administrators or the server's configured admin role
-    (see cogs/admin.py for setadminrole)."""
+    (see cogs/admin.py for setadminrole).
+
+    Logging is now split across two channels instead of one:
+      - kick/mute/unmute        -> the "kickban" channel (auto: kicks-bans-mutes)
+      - warn/clear/lock/slowmode -> the "modlog" channel (auto: mod-commands)
+    Both are auto-detected by channel name, or can be pinned explicitly with
+    /setchannel (see cogs/admin.py).
+    """
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    async def log_action(self, guild: discord.Guild, embed: discord.Embed):
-        if not MOD_LOG_CHANNEL_ID:
-            return
-        channel = guild.get_channel(int(MOD_LOG_CHANNEL_ID))
+    async def log_to(self, guild: discord.Guild, channel_type: str, embed: discord.Embed):
+        channel = get_channel(guild, channel_type)
         if channel:
-            await channel.send(embed=embed)
+            try:
+                await channel.send(embed=embed)
+            except discord.HTTPException:
+                pass
 
     def build_embed(self, action: str, target, moderator, reason: str, color=discord.Color.orange()):
         embed = discord.Embed(title=f"Member {action}", color=color, timestamp=datetime.datetime.utcnow())
@@ -46,7 +52,7 @@ class Moderation(commands.Cog):
         await member.kick(reason=reason)
         embed = self.build_embed("Kicked", member, ctx.author, reason, discord.Color.orange())
         await ctx.send(embed=embed)
-        await self.log_action(ctx.guild, embed)
+        await self.log_to(ctx.guild, "kickban", embed)
 
     # ---------- MUTE (native timeout) ----------
     @commands.hybrid_command(name="mute", description="Timeout a member for a number of minutes.")
@@ -61,7 +67,7 @@ class Moderation(commands.Cog):
         await member.timeout(duration, reason=reason)
         embed = self.build_embed(f"Muted ({minutes}m)", member, ctx.author, reason, discord.Color.dark_orange())
         await ctx.send(embed=embed)
-        await self.log_action(ctx.guild, embed)
+        await self.log_to(ctx.guild, "kickban", embed)
 
     @commands.hybrid_command(name="unmute", description="Remove a member's timeout.")
     @app_commands.describe(member="The member to unmute", reason="Why they're being unmuted")
@@ -72,7 +78,7 @@ class Moderation(commands.Cog):
         await member.timeout(None, reason=reason)
         embed = self.build_embed("Unmuted", member, ctx.author, reason, discord.Color.green())
         await ctx.send(embed=embed)
-        await self.log_action(ctx.guild, embed)
+        await self.log_to(ctx.guild, "kickban", embed)
 
     # ---------- WARN ----------
     @commands.hybrid_command(name="warn", description="Issue a warning to a member.")
@@ -82,7 +88,7 @@ class Moderation(commands.Cog):
         count = add_warning(ctx.guild.id, member.id, ctx.author.id, reason or "No reason provided")
         embed = self.build_embed(f"Warned (total: {count})", member, ctx.author, reason, discord.Color.yellow())
         await ctx.send(embed=embed)
-        await self.log_action(ctx.guild, embed)
+        await self.log_to(ctx.guild, "modlog", embed)
 
     @commands.hybrid_command(name="warnings", description="List a member's warnings.")
     @app_commands.describe(member="The member to check")
@@ -106,7 +112,9 @@ class Moderation(commands.Cog):
     @is_mod()
     async def clearwarns(self, ctx: commands.Context, member: discord.Member):
         clear_warnings(ctx.guild.id, member.id)
+        embed = self.build_embed("Warnings cleared", member, ctx.author, None, discord.Color.green())
         await ctx.send(f"Cleared all warnings for {member.mention}.")
+        await self.log_to(ctx.guild, "modlog", embed)
 
     # ---------- CLEAR / PURGE ----------
     @commands.hybrid_command(name="clear", description="Bulk delete recent messages in this channel.")
@@ -123,6 +131,15 @@ class Moderation(commands.Cog):
         limit = amount + 1 if ctx.interaction is None else amount
         deleted = await ctx.channel.purge(limit=limit)
         await ctx.send(f"Deleted {len(deleted)} messages.", ephemeral=True)
+        embed = discord.Embed(
+            title="Messages cleared",
+            color=discord.Color.blurple(),
+            timestamp=datetime.datetime.utcnow(),
+        )
+        embed.add_field(name="Channel", value=ctx.channel.mention, inline=False)
+        embed.add_field(name="Moderator", value=str(ctx.author), inline=False)
+        embed.add_field(name="Messages deleted", value=str(len(deleted)), inline=False)
+        await self.log_to(ctx.guild, "modlog", embed)
 
     # ---------- LOCK / UNLOCK ----------
     @commands.hybrid_command(name="lock", description="Lock a channel so @everyone can't send messages.")
@@ -138,7 +155,7 @@ class Moderation(commands.Cog):
         embed = self.build_embed("Channel Locked", ctx.author, ctx.author, reason, discord.Color.red())
         embed.title = f"🔒 {channel.mention} locked"
         await ctx.send(embed=embed)
-        await self.log_action(ctx.guild, embed)
+        await self.log_to(ctx.guild, "modlog", embed)
 
     @commands.hybrid_command(name="unlock", description="Unlock a previously locked channel.")
     @app_commands.describe(channel="Channel to unlock (defaults to the current channel)", reason="Why it's being unlocked")
@@ -153,7 +170,7 @@ class Moderation(commands.Cog):
         embed = self.build_embed("Channel Unlocked", ctx.author, ctx.author, reason, discord.Color.green())
         embed.title = f"🔓 {channel.mention} unlocked"
         await ctx.send(embed=embed)
-        await self.log_action(ctx.guild, embed)
+        await self.log_to(ctx.guild, "modlog", embed)
 
     # ---------- SLOWMODE ----------
     @commands.hybrid_command(name="slowmode", description="Set slowmode delay for a channel (0 turns it off).")
@@ -170,6 +187,15 @@ class Moderation(commands.Cog):
             await ctx.send(f"Slowmode turned off in {channel.mention}.")
         else:
             await ctx.send(f"Slowmode set to {seconds}s in {channel.mention}.")
+        embed = discord.Embed(
+            title="Slowmode changed",
+            color=discord.Color.blurple(),
+            timestamp=datetime.datetime.utcnow(),
+        )
+        embed.add_field(name="Channel", value=channel.mention, inline=False)
+        embed.add_field(name="Moderator", value=str(ctx.author), inline=False)
+        embed.add_field(name="Delay", value=f"{seconds}s", inline=False)
+        await self.log_to(ctx.guild, "modlog", embed)
 
     # ---------- Error handling ----------
     @kick.error

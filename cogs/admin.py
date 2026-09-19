@@ -1,11 +1,17 @@
 import os
+import datetime
 import discord
 from discord import app_commands
 from discord.ext import commands
 
 from utils.config import get_guild_config, set_guild_value
+from utils.channels import get_channel, CONFIG_KEY_MAP
 
 DEV_GUILD_ID = os.getenv("DEV_GUILD_ID")
+
+CHANNEL_TYPE_CHOICES = [
+    app_commands.Choice(name=t, value=t) for t in CONFIG_KEY_MAP
+]
 
 
 class AdminConfig(commands.Cog):
@@ -16,6 +22,20 @@ class AdminConfig(commands.Cog):
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+
+    async def log_config_change(self, guild: discord.Guild, title: str, description: str):
+        channel = get_channel(guild, "modlog")
+        if channel:
+            embed = discord.Embed(
+                title=title,
+                description=description,
+                color=discord.Color.blurple(),
+                timestamp=datetime.datetime.utcnow(),
+            )
+            try:
+                await channel.send(embed=embed)
+            except discord.HTTPException:
+                pass
 
     # ---------- ADMIN ROLE ----------
     @commands.hybrid_command(name="setadminrole", description="Grant a role Administrator permission and mod-command access.")
@@ -44,6 +64,10 @@ class AdminConfig(commands.Cog):
             f"⚠️ This means anyone with that role can do anything in the server — "
             f"assign it carefully."
         )
+        await self.log_config_change(
+            ctx.guild, "⚙️ Admin role changed",
+            f"{ctx.author} granted real Administrator permission to {role.mention}.",
+        )
 
     @commands.hybrid_command(name="revokeadminrole", description="Remove Administrator permission from the current admin role.")
     @commands.has_permissions(administrator=True)
@@ -62,6 +86,10 @@ class AdminConfig(commands.Cog):
             await role.edit(permissions=new_permissions, reason=f"Admin role revoked by {ctx.author}")
         set_guild_value(ctx.guild.id, "admin_role_id", None)
         await ctx.send(f"Removed Administrator permission from {role.mention if role else 'that role'} and cleared the admin role setting.")
+        await self.log_config_change(
+            ctx.guild, "⚙️ Admin role changed",
+            f"{ctx.author} revoked Administrator permission from {role.mention if role else '(deleted role)'}.",
+        )
 
     @commands.hybrid_command(name="adminrole", description="Show the server's current admin role.")
     async def adminrole(self, ctx: commands.Context):
@@ -73,8 +101,8 @@ class AdminConfig(commands.Cog):
         await ctx.send(f"Current admin role: {role.mention if role else '(role no longer exists)'}")
 
     # ---------- WELCOME CHANNEL ----------
-    @commands.hybrid_command(name="setwelcome", description="Set the channel used for welcome/leave messages.")
-    @app_commands.describe(channel="The channel to post welcome/leave messages in")
+    @commands.hybrid_command(name="setwelcome", description="Set the channel used for join messages.")
+    @app_commands.describe(channel="The channel to post welcome messages in")
     @commands.has_permissions(administrator=True)
     async def setwelcome(self, ctx: commands.Context, channel: discord.TextChannel):
         set_guild_value(ctx.guild.id, "welcome_channel_id", channel.id)
@@ -82,16 +110,53 @@ class AdminConfig(commands.Cog):
 
     @commands.hybrid_command(name="welcomechannel", description="Show the server's current welcome channel.")
     async def welcomechannel(self, ctx: commands.Context):
-        cfg = get_guild_config(ctx.guild.id)
-        channel_id = cfg.get("welcome_channel_id")
-        if channel_id is None:
+        channel = get_channel(ctx.guild, "welcome")
+        if channel is None:
             return await ctx.send(
-                "No welcome channel set yet — I'll try to auto-detect a channel named "
-                "`welcome`. An Administrator can set one explicitly with `setwelcome`.",
+                "No welcome channel found or set yet. An Administrator can set one explicitly with `setwelcome`.",
                 ephemeral=True,
             )
-        channel = ctx.guild.get_channel(channel_id)
-        await ctx.send(f"Current welcome channel: {channel.mention if channel else '(channel no longer exists)'}")
+        await ctx.send(f"Current welcome channel: {channel.mention}")
+
+    # ---------- GENERAL CHANNEL ROUTING ----------
+    @commands.hybrid_command(
+        name="setchannel",
+        description="Point a bot feature (logs, modlog, kickban, automod, updates, welcome) at a specific channel.",
+    )
+    @app_commands.describe(channel_type="Which feature to route", channel="The channel to send it to")
+    @app_commands.choices(channel_type=CHANNEL_TYPE_CHOICES)
+    @commands.has_permissions(administrator=True)
+    async def setchannel(self, ctx: commands.Context, channel_type: str, channel: discord.TextChannel):
+        if channel_type not in CONFIG_KEY_MAP:
+            return await ctx.send(
+                f"Unknown channel type. Choose from: {', '.join(CONFIG_KEY_MAP)}", ephemeral=True
+            )
+        set_guild_value(ctx.guild.id, CONFIG_KEY_MAP[channel_type], channel.id)
+        await ctx.send(f"`{channel_type}` will now use {channel.mention}.")
+
+    @commands.hybrid_command(name="channels", description="Show which channel each bot feature is currently using.")
+    async def channels(self, ctx: commands.Context):
+        embed = discord.Embed(
+            title="Channel routing",
+            description="Auto-detected by channel name unless set explicitly with `/setchannel`.",
+            color=discord.Color.blurple(),
+        )
+        labels = {
+            "welcome": "👋 Welcome (joins)",
+            "logs": "📜 Logs (leaves, audit trail)",
+            "modlog": "🛠️ Mod log (warn/clear/lock/slowmode)",
+            "kickban": "🔨 Kick/ban/mute log",
+            "automod": "🚨 Automod flags",
+            "updates": "🔧 Bot update announcements",
+        }
+        for ctype, label in labels.items():
+            channel = get_channel(ctx.guild, ctype)
+            embed.add_field(
+                name=label,
+                value=channel.mention if channel else "*(not found — set with /setchannel)*",
+                inline=False,
+            )
+        await ctx.send(embed=embed)
 
     # ---------- SYNC (push new/changed commands to Discord without restarting) ----------
     @commands.hybrid_command(
@@ -114,6 +179,7 @@ class AdminConfig(commands.Cog):
     @setadminrole.error
     @revokeadminrole.error
     @setwelcome.error
+    @setchannel.error
     async def admin_config_error(self, ctx: commands.Context, error):
         if isinstance(error, commands.MissingPermissions):
             await ctx.send("Only server Administrators can change this setting.", ephemeral=True)

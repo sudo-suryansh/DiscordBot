@@ -5,6 +5,10 @@ import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 
+from version import VERSION, CHANGELOG
+from utils.state import get_last_announced_version, set_last_announced_version
+from utils.channels import get_channel
+
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 
@@ -22,11 +26,44 @@ bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 # List of cogs to load. Add new ones here as you build them (e.g. "cogs.dsa").
 INITIAL_EXTENSIONS = [
     "cogs.moderation",
+    "cogs.automod",
     "cogs.utility",
     "cogs.admin",
     "cogs.help",
     "cogs.power",
 ]
+
+
+async def announce_update_if_needed():
+    """Compares VERSION (version.py) against the last version we announced
+    (data/state.json). If it's new, posts that version's CHANGELOG entry to
+    every server's #updates channel, then remembers the new version so it
+    doesn't announce it again on the next restart.
+
+    Workflow: bump VERSION + add a CHANGELOG entry in version.py whenever you
+    ship a change, then restart the bot — the announcement happens on its own."""
+    last = get_last_announced_version()
+    if last == VERSION:
+        return
+
+    changes = CHANGELOG.get(VERSION, ["No changelog notes were added for this version."])
+    embed = discord.Embed(
+        title=f"🔧 Bot updated to v{VERSION}",
+        description="\n".join(f"• {c}" for c in changes),
+        color=discord.Color.green(),
+    )
+    if last:
+        embed.set_footer(text=f"Previous version: v{last}")
+
+    for guild in bot.guilds:
+        channel = get_channel(guild, "updates")
+        if channel:
+            try:
+                await channel.send(embed=embed)
+            except discord.HTTPException:
+                pass
+
+    set_last_announced_version(VERSION)
 
 
 @bot.event
@@ -45,6 +82,8 @@ async def on_ready():
             print(f"Synced {len(synced)} slash command(s) globally (can take up to ~1 hour to appear everywhere).")
     except Exception as e:
         print(f"Failed to sync slash commands: {e}")
+
+    await announce_update_if_needed()
 
 
 async def main():

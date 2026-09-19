@@ -5,8 +5,21 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
 CONFIG_FILE = os.path.join(DATA_DIR, "config.json")
 
 DEFAULTS = {
-    "admin_role_id": None,      # role allowed to use mod commands (kick, mute, warn, etc.)
-    "welcome_channel_id": None, # channel where join messages are posted
+    "admin_role_id": None,       # role allowed to use mod commands (kick, mute, warn, etc.)
+    "welcome_channel_id": None,  # channel where join messages + join DMs originate from
+    "log_channel_id": None,      # general audit log: joins/leaves, lock/unlock, etc.
+    "mod_log_channel_id": None,  # warn/clearwarns/clear/lock/unlock/slowmode/admin-config logs
+    "kick_ban_channel_id": None, # kick/mute/unmute logs
+    "automod_channel_id": None,  # automod flags (spam, mass mentions, invite links)
+    "update_channel_id": None,   # bot version/changelog announcements
+
+    # Automod is on by default but deliberately lenient — see cogs/automod.py.
+    "automod_enabled": True,
+    "automod_spam_count": 5,       # messages...
+    "automod_spam_seconds": 5,     # ...within this many seconds triggers a flag
+    "automod_mute_minutes": 5,     # timeout duration when spam is caught
+    "automod_max_mentions": 5,     # mentions (users+roles) allowed per message
+    "automod_block_invites": True,
 }
 
 
