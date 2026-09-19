@@ -5,10 +5,7 @@ import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 
-from version import VERSION, CHANGELOG
-from utils.state import get_last_announced_version, set_last_announced_version
-from utils.channels import get_channel
-from utils.embeds import action_embed
+from utils.updates import announce_update
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -35,37 +32,6 @@ INITIAL_EXTENSIONS = [
 ]
 
 
-async def announce_update_if_needed():
-    """Compares VERSION (version.py) against the last version we announced
-    (data/state.json). If it's new, posts that version's CHANGELOG entry to
-    every server's #updates channel, then remembers the new version so it
-    doesn't announce it again on the next restart.
-
-    Workflow: bump VERSION + add a CHANGELOG entry in version.py whenever you
-    ship a change, then restart the bot — the announcement happens on its own."""
-    last = get_last_announced_version()
-    if last == VERSION:
-        return
-
-    changes = CHANGELOG.get(VERSION, ["No changelog notes were added for this version."])
-    embed = action_embed(
-        "update", f"Bot updated to v{VERSION}",
-        description="\n".join(f"• {c}" for c in changes),
-        color=discord.Color.green(),
-        footer=f"Previous version: v{last}" if last else None,
-    )
-
-    for guild in bot.guilds:
-        channel = get_channel(guild, "updates")
-        if channel:
-            try:
-                await channel.send(embed=embed)
-            except discord.HTTPException:
-                pass
-
-    set_last_announced_version(VERSION)
-
-
 @bot.event
 async def on_ready():
     print(f"Bot is online as {bot.user} (id: {bot.user.id})")
@@ -83,7 +49,13 @@ async def on_ready():
     except Exception as e:
         print(f"Failed to sync slash commands: {e}")
 
-    await announce_update_if_needed()
+    # Bump VERSION + add a CHANGELOG entry in version.py whenever you ship a
+    # change, then restart — this checks on every startup and announces once.
+    # Prints exactly what happened (or why it didn't) instead of failing silently.
+    # You can also trigger this on demand with the owner-only /checkupdate command.
+    results = await announce_update(bot)
+    for guild_name, status in results:
+        print(f"[update announce] {guild_name}: {status}")
 
 
 async def main():

@@ -6,6 +6,9 @@ from discord.ext import commands
 from utils.config import get_guild_config, set_guild_value
 from utils.channels import get_channel, CONFIG_KEY_MAP
 from utils.embeds import action_embed
+from utils.updates import announce_update
+from utils.state import get_last_announced_version
+from version import VERSION
 
 DEV_GUILD_ID = os.getenv("DEV_GUILD_ID")
 
@@ -171,6 +174,34 @@ class AdminConfig(commands.Cog):
         else:
             synced = await self.bot.tree.sync()
             await ctx.send(f"Synced {len(synced)} command(s) globally (can take up to ~1 hour to show everywhere).", ephemeral=True)
+
+    # ---------- UPDATE DIAGNOSTICS ----------
+    @commands.hybrid_command(name="version", description="Show the bot's running version and last announced version.")
+    async def version(self, ctx: commands.Context):
+        last = get_last_announced_version()
+        await ctx.send(
+            f"Running version: `{VERSION}`\nLast announced in #updates: `{last or 'never'}`",
+            ephemeral=True,
+        )
+
+    @commands.hybrid_command(
+        name="checkupdate",
+        description="Owner only: manually (re)send the update announcement now and report exactly what happened.",
+    )
+    @commands.is_owner()
+    async def checkupdate(self, ctx: commands.Context):
+        await ctx.defer(ephemeral=True)
+        results = await announce_update(self.bot, force=True)
+        lines = [f"**{name}**: {status}" for name, status in results]
+        await ctx.send("\n".join(lines) or "No guilds to check.", ephemeral=True)
+
+    @checkupdate.error
+    async def checkupdate_error(self, ctx: commands.Context, error):
+        if isinstance(error, commands.NotOwner):
+            await ctx.send("Only the bot's owner can run this.", ephemeral=True)
+        else:
+            await ctx.send(f"Something went wrong: {error}", ephemeral=True)
+            raise error
 
     # ---------- Error handling ----------
     @setadminrole.error
