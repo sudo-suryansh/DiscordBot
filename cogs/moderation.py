@@ -1,4 +1,3 @@
-import datetime
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -7,6 +6,7 @@ from utils.storage import add_warning, get_warnings, clear_warnings
 from utils.config import get_guild_config
 from utils.checks import is_mod
 from utils.channels import get_channel
+from utils.embeds import member_action_embed, action_embed
 
 
 class Moderation(commands.Cog):
@@ -15,7 +15,7 @@ class Moderation(commands.Cog):
     Restricted to real Administrators or the server's configured admin role
     (see cogs/admin.py for setadminrole).
 
-    Logging is now split across two channels instead of one:
+    Logging is split across two channels instead of one:
       - kick/mute/unmute        -> the "kickban" channel (auto: kicks-bans-mutes)
       - warn/clear/lock/slowmode -> the "modlog" channel (auto: mod-commands)
     Both are auto-detected by channel name, or can be pinned explicitly with
@@ -33,13 +33,6 @@ class Moderation(commands.Cog):
             except discord.HTTPException:
                 pass
 
-    def build_embed(self, action: str, target, moderator, reason: str, color=discord.Color.orange()):
-        embed = discord.Embed(title=f"Member {action}", color=color, timestamp=datetime.datetime.utcnow())
-        embed.add_field(name="User", value=f"{target} ({target.id})", inline=False)
-        embed.add_field(name="Moderator", value=f"{moderator}", inline=False)
-        embed.add_field(name="Reason", value=reason or "No reason provided", inline=False)
-        return embed
-
     # ---------- KICK ----------
     @commands.hybrid_command(name="kick", description="Kick a member from the server.")
     @app_commands.describe(member="The member to kick", reason="Why they're being kicked")
@@ -50,7 +43,7 @@ class Moderation(commands.Cog):
         if not ctx.guild.me.guild_permissions.kick_members:
             return await ctx.send("I don't have permission to kick members.", ephemeral=True)
         await member.kick(reason=reason)
-        embed = self.build_embed("Kicked", member, ctx.author, reason, discord.Color.orange())
+        embed = member_action_embed("kick", "Member Kicked", member, ctx.author, reason, discord.Color.orange())
         await ctx.send(embed=embed)
         await self.log_to(ctx.guild, "kickban", embed)
 
@@ -63,9 +56,12 @@ class Moderation(commands.Cog):
             return await ctx.send("You can't mute someone with an equal or higher role than you.", ephemeral=True)
         if not ctx.guild.me.guild_permissions.moderate_members:
             return await ctx.send("I don't have permission to timeout members.", ephemeral=True)
-        duration = datetime.timedelta(minutes=minutes)
-        await member.timeout(duration, reason=reason)
-        embed = self.build_embed(f"Muted ({minutes}m)", member, ctx.author, reason, discord.Color.dark_orange())
+        import datetime
+        await member.timeout(datetime.timedelta(minutes=minutes), reason=reason)
+        embed = member_action_embed(
+            "mute", "Member Muted", member, ctx.author, reason, discord.Color.dark_orange(),
+            extra_fields=[("Duration", f"{minutes} minutes", True)],
+        )
         await ctx.send(embed=embed)
         await self.log_to(ctx.guild, "kickban", embed)
 
@@ -76,7 +72,7 @@ class Moderation(commands.Cog):
         if not ctx.guild.me.guild_permissions.moderate_members:
             return await ctx.send("I don't have permission to manage timeouts.", ephemeral=True)
         await member.timeout(None, reason=reason)
-        embed = self.build_embed("Unmuted", member, ctx.author, reason, discord.Color.green())
+        embed = member_action_embed("unmute", "Member Unmuted", member, ctx.author, reason, discord.Color.green())
         await ctx.send(embed=embed)
         await self.log_to(ctx.guild, "kickban", embed)
 
@@ -86,7 +82,10 @@ class Moderation(commands.Cog):
     @is_mod()
     async def warn(self, ctx: commands.Context, member: discord.Member, *, reason: str = None):
         count = add_warning(ctx.guild.id, member.id, ctx.author.id, reason or "No reason provided")
-        embed = self.build_embed(f"Warned (total: {count})", member, ctx.author, reason, discord.Color.yellow())
+        embed = member_action_embed(
+            "warn", "Member Warned", member, ctx.author, reason, discord.Color.yellow(),
+            extra_fields=[("Total warnings", str(count), True)],
+        )
         await ctx.send(embed=embed)
         await self.log_to(ctx.guild, "modlog", embed)
 
@@ -97,12 +96,13 @@ class Moderation(commands.Cog):
         warns = get_warnings(ctx.guild.id, member.id)
         if not warns:
             return await ctx.send(f"{member.mention} has no warnings.", ephemeral=True)
-        embed = discord.Embed(title=f"Warnings for {member}", color=discord.Color.yellow())
+        embed = discord.Embed(title=f"⚠️ Warnings for {member}", color=discord.Color.yellow())
+        embed.set_thumbnail(url=member.display_avatar.url)
         for i, w in enumerate(warns, start=1):
             mod = ctx.guild.get_member(w["moderator_id"])
             embed.add_field(
-                name=f"#{i}",
-                value=f"Reason: {w['reason']}\nBy: {mod.mention if mod else w['moderator_id']}",
+                name=f"#{i} — {w['reason']}",
+                value=f"By {mod.mention if mod else w['moderator_id']}",
                 inline=False,
             )
         await ctx.send(embed=embed)
@@ -112,7 +112,7 @@ class Moderation(commands.Cog):
     @is_mod()
     async def clearwarns(self, ctx: commands.Context, member: discord.Member):
         clear_warnings(ctx.guild.id, member.id)
-        embed = self.build_embed("Warnings cleared", member, ctx.author, None, discord.Color.green())
+        embed = member_action_embed("clearwarns", "Warnings Cleared", member, ctx.author, None, discord.Color.green())
         await ctx.send(f"Cleared all warnings for {member.mention}.")
         await self.log_to(ctx.guild, "modlog", embed)
 
@@ -126,19 +126,16 @@ class Moderation(commands.Cog):
         if not ctx.guild.me.guild_permissions.manage_messages:
             return await ctx.send("I don't have permission to manage messages.", ephemeral=True)
         await ctx.defer(ephemeral=True)
-        # +1 for prefix invocation to also remove the "!clear 10" message itself;
-        # slash invocations don't leave a message behind, purge() handles both fine.
         limit = amount + 1 if ctx.interaction is None else amount
         deleted = await ctx.channel.purge(limit=limit)
         await ctx.send(f"Deleted {len(deleted)} messages.", ephemeral=True)
-        embed = discord.Embed(
-            title="Messages cleared",
-            color=discord.Color.blurple(),
-            timestamp=datetime.datetime.utcnow(),
+        embed = action_embed(
+            "clear", "Messages Cleared", color=discord.Color.blurple(), actor=ctx.author,
+            fields=[
+                ("Channel", ctx.channel.mention, True),
+                ("Messages deleted", str(len(deleted)), True),
+            ],
         )
-        embed.add_field(name="Channel", value=ctx.channel.mention, inline=False)
-        embed.add_field(name="Moderator", value=str(ctx.author), inline=False)
-        embed.add_field(name="Messages deleted", value=str(len(deleted)), inline=False)
         await self.log_to(ctx.guild, "modlog", embed)
 
     # ---------- LOCK / UNLOCK ----------
@@ -152,8 +149,10 @@ class Moderation(commands.Cog):
         overwrite = channel.overwrites_for(ctx.guild.default_role)
         overwrite.send_messages = False
         await channel.set_permissions(ctx.guild.default_role, overwrite=overwrite, reason=reason)
-        embed = self.build_embed("Channel Locked", ctx.author, ctx.author, reason, discord.Color.red())
-        embed.title = f"🔒 {channel.mention} locked"
+        embed = action_embed(
+            "lock", f"{channel.name} locked", color=discord.Color.red(), actor=ctx.author,
+            fields=[("Reason", reason or "No reason provided", False)],
+        )
         await ctx.send(embed=embed)
         await self.log_to(ctx.guild, "modlog", embed)
 
@@ -167,8 +166,10 @@ class Moderation(commands.Cog):
         overwrite = channel.overwrites_for(ctx.guild.default_role)
         overwrite.send_messages = None  # reset to default rather than forcing True, respects other role overrides
         await channel.set_permissions(ctx.guild.default_role, overwrite=overwrite, reason=reason)
-        embed = self.build_embed("Channel Unlocked", ctx.author, ctx.author, reason, discord.Color.green())
-        embed.title = f"🔓 {channel.mention} unlocked"
+        embed = action_embed(
+            "unlock", f"{channel.name} unlocked", color=discord.Color.green(), actor=ctx.author,
+            fields=[("Reason", reason or "No reason provided", False)],
+        )
         await ctx.send(embed=embed)
         await self.log_to(ctx.guild, "modlog", embed)
 
@@ -187,14 +188,10 @@ class Moderation(commands.Cog):
             await ctx.send(f"Slowmode turned off in {channel.mention}.")
         else:
             await ctx.send(f"Slowmode set to {seconds}s in {channel.mention}.")
-        embed = discord.Embed(
-            title="Slowmode changed",
-            color=discord.Color.blurple(),
-            timestamp=datetime.datetime.utcnow(),
+        embed = action_embed(
+            "slowmode", "Slowmode changed", color=discord.Color.blurple(), actor=ctx.author,
+            fields=[("Channel", channel.mention, True), ("Delay", f"{seconds}s", True)],
         )
-        embed.add_field(name="Channel", value=channel.mention, inline=False)
-        embed.add_field(name="Moderator", value=str(ctx.author), inline=False)
-        embed.add_field(name="Delay", value=f"{seconds}s", inline=False)
         await self.log_to(ctx.guild, "modlog", embed)
 
     # ---------- Error handling ----------

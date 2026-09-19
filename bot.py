@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from version import VERSION, CHANGELOG
 from utils.state import get_last_announced_version, set_last_announced_version
 from utils.channels import get_channel
+from utils.embeds import action_embed
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -47,13 +48,12 @@ async def announce_update_if_needed():
         return
 
     changes = CHANGELOG.get(VERSION, ["No changelog notes were added for this version."])
-    embed = discord.Embed(
-        title=f"🔧 Bot updated to v{VERSION}",
+    embed = action_embed(
+        "update", f"Bot updated to v{VERSION}",
         description="\n".join(f"• {c}" for c in changes),
         color=discord.Color.green(),
+        footer=f"Previous version: v{last}" if last else None,
     )
-    if last:
-        embed.set_footer(text=f"Previous version: v{last}")
 
     for guild in bot.guilds:
         channel = get_channel(guild, "updates")

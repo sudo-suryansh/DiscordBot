@@ -1,10 +1,10 @@
-import datetime
 import discord
 from discord import app_commands
 from discord.ext import commands
 
 from utils.motivation import generate_welcome_dm
 from utils.channels import get_channel
+from utils.embeds import action_embed
 
 
 class Utility(commands.Cog):
@@ -40,14 +40,14 @@ class Utility(commands.Cog):
 
         log_channel = get_channel(member.guild, "logs")
         if log_channel:
-            embed = discord.Embed(
-                title="📥 Member joined",
-                description=f"{member.mention} ({member})",
-                color=discord.Color.green(),
-                timestamp=datetime.datetime.utcnow(),
+            embed = action_embed(
+                "join", "Member joined", color=discord.Color.green(), actor=member,
+                fields=[
+                    ("Account created", member.created_at.strftime("%b %d, %Y"), True),
+                    ("Member count", str(member.guild.member_count), True),
+                ],
+                footer=f"User ID: {member.id}",
             )
-            embed.add_field(name="Account created", value=member.created_at.strftime("%b %d, %Y"))
-            embed.add_field(name="Member count", value=str(member.guild.member_count))
             try:
                 await log_channel.send(embed=embed)
             except discord.HTTPException:
@@ -58,15 +58,15 @@ class Utility(commands.Cog):
         # Leave messages no longer go to #welcome — only the logs channel.
         log_channel = get_channel(member.guild, "logs")
         if log_channel:
-            embed = discord.Embed(
-                title="📤 Member left",
-                description=f"{member} ({member.id})",
-                color=discord.Color.red(),
-                timestamp=datetime.datetime.utcnow(),
-            )
             joined = member.joined_at.strftime("%b %d, %Y") if member.joined_at else "Unknown"
-            embed.add_field(name="Had joined on", value=joined)
-            embed.add_field(name="Member count", value=str(member.guild.member_count))
+            embed = action_embed(
+                "leave", "Member left", color=discord.Color.red(), actor=member,
+                fields=[
+                    ("Had joined on", joined, True),
+                    ("Member count", str(member.guild.member_count), True),
+                ],
+                footer=f"User ID: {member.id}",
+            )
             try:
                 await log_channel.send(embed=embed)
             except discord.HTTPException:

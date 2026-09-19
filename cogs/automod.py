@@ -9,6 +9,7 @@ from discord.ext import commands
 from utils.config import get_guild_config, set_guild_value
 from utils.channels import get_channel
 from utils.checks import is_mod
+from utils.embeds import action_embed
 
 INVITE_RE = re.compile(r"(discord\.gg/|discord(?:app)?\.com/invite/)", re.IGNORECASE)
 
@@ -31,17 +32,17 @@ class AutoMod(commands.Cog):
         channel = get_channel(message.guild, "automod")
         if not channel:
             return
-        embed = discord.Embed(
-            title="🚨 Automod flag",
-            color=discord.Color.red(),
-            timestamp=discord.utils.utcnow(),
-        )
-        embed.add_field(name="User", value=f"{message.author} ({message.author.id})", inline=False)
-        embed.add_field(name="Channel", value=message.channel.mention, inline=False)
-        embed.add_field(name="Reason", value=reason, inline=False)
-        embed.add_field(name="Action taken", value=action, inline=False)
         content = message.content[:500] if message.content else "*(no text content)*"
-        embed.add_field(name="Message", value=content, inline=False)
+        embed = action_embed(
+            "automod", "Automod flag", color=discord.Color.red(), actor=message.author,
+            fields=[
+                ("Channel", message.channel.mention, True),
+                ("Action taken", action, True),
+                ("Reason", reason, False),
+                ("Message", content, False),
+            ],
+            footer=f"User ID: {message.author.id}",
+        )
         try:
             await channel.send(embed=embed)
         except discord.HTTPException:

@@ -1,11 +1,11 @@
 import os
-import datetime
 import discord
 from discord import app_commands
 from discord.ext import commands
 
 from utils.config import get_guild_config, set_guild_value
 from utils.channels import get_channel, CONFIG_KEY_MAP
+from utils.embeds import action_embed
 
 DEV_GUILD_ID = os.getenv("DEV_GUILD_ID")
 
@@ -23,15 +23,10 @@ class AdminConfig(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    async def log_config_change(self, guild: discord.Guild, title: str, description: str):
+    async def log_config_change(self, guild: discord.Guild, title: str, description: str, actor=None):
         channel = get_channel(guild, "modlog")
         if channel:
-            embed = discord.Embed(
-                title=title,
-                description=description,
-                color=discord.Color.blurple(),
-                timestamp=datetime.datetime.utcnow(),
-            )
+            embed = action_embed("config", title, description, color=discord.Color.blurple(), actor=actor)
             try:
                 await channel.send(embed=embed)
             except discord.HTTPException:
@@ -65,8 +60,9 @@ class AdminConfig(commands.Cog):
             f"assign it carefully."
         )
         await self.log_config_change(
-            ctx.guild, "⚙️ Admin role changed",
-            f"{ctx.author} granted real Administrator permission to {role.mention}.",
+            ctx.guild, "Admin role changed",
+            f"Granted real Administrator permission to {role.mention}.",
+            actor=ctx.author,
         )
 
     @commands.hybrid_command(name="revokeadminrole", description="Remove Administrator permission from the current admin role.")
@@ -87,8 +83,9 @@ class AdminConfig(commands.Cog):
         set_guild_value(ctx.guild.id, "admin_role_id", None)
         await ctx.send(f"Removed Administrator permission from {role.mention if role else 'that role'} and cleared the admin role setting.")
         await self.log_config_change(
-            ctx.guild, "⚙️ Admin role changed",
-            f"{ctx.author} revoked Administrator permission from {role.mention if role else '(deleted role)'}.",
+            ctx.guild, "Admin role changed",
+            f"Revoked Administrator permission from {role.mention if role else '(deleted role)'}.",
+            actor=ctx.author,
         )
 
     @commands.hybrid_command(name="adminrole", description="Show the server's current admin role.")
