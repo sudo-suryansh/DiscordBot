@@ -9,6 +9,7 @@ cogs/
   automod.py              # NEW — configurable anti-spam (flooding, mass mentions, invite links)
   admin.py                # !setadminrole, !setwelcome, !setchannel, !channels — config, Administrator-only
   utility.py               # ping, serverinfo, userinfo, welcome/leave events
+  dsa.py                   # LeetCode problem picker and problem-channel setup
 utils/
   storage.py              # JSON-backed warning storage
   config.py                # JSON-backed per-server config (admin role, channels, automod settings)
@@ -50,6 +51,8 @@ To point a feature at a specific channel instead of relying on auto-detection:
 !setchannel modlog #my-custom-modlog
 ```
 Check what's currently active any time with `!channels`.
+
+Set the channel for requested LeetCode problems with `!setprobchannel #dsa-problems` (Administrator only).
 
 ## Automod (new)
 Lightweight and intentionally lenient — it's meant to catch obvious spam, not police normal chatting. Mods/admins and the bot itself are always exempt.
@@ -100,6 +103,7 @@ Bump `VERSION` in `version.py` and add a bullet list under it in `CHANGELOG` whe
 - `!revokeadminrole` — removes it
 - `!adminrole` — show current admin role
 - `!setwelcome #channel`
+- `!setprobchannel #channel` — choose where LeetCode problems are posted
 - `!setchannel <welcome|logs|modlog|kickban|automod|updates> #channel`
 - `!channels` — show all current channel routing
 - `!welcomechannel` — show current welcome channel
@@ -109,5 +113,19 @@ Bump `VERSION` in `version.py` and add a bullet list under it in `CHANGELOG` whe
 - `!serverinfo`
 - `!userinfo [@user]`
 
+**DSA practice** (anyone)
+- `!leet <easy|mid|hard|number> [topic] [dm]` — choose a random problem by difficulty/topic, or fetch an exact LeetCode number, e.g. `!leet 20`. Add a final `dm` to also send it privately, e.g. `!leet 20 dm` or `!leet mid graph dm`.
+- If the requested number is premium, the bot replies `bhadwe, question paid hai` instead of sending the problem.
+- `!another` — within five minutes of your last problem, send another at the same difficulty, topic, and DM preference. `!another <easy|mid|hard> [topic] [dm]` lets you change them.
+- `/leet` provides difficulty choices and an optional topic field; add `dm` at the end of the topic to also receive it privately. Problem statements come from LeetCode; learning topics are based on its problem tags.
+- `/another` provides the same repeat and override options.
+- Both commands work in the bot's DMs too. A direct DM request stays private; in a server, the problem is posted there by default and sent privately only when `dm` is requested.
+- Every successful problem request (`!leet` or `!another`) starts a 30-second cooldown. After five minutes, start a new request with `!leet`; `!another` expires.
+- DM commands such as `!ping`, `!userinfo`, `!version`, `!leet`, and `!another` have a 20-second gap for light commands and 30 seconds for problem fetches.
+- More than 10 DM messages or commands within one minute triggers a one-hour DM lockout. The bot sends a notice first, then skips that user's DM message and command processing during the lockout. Discord still delivers gateway events to the bot.
+- In a bot DM, you can type commands without `!`: `ping`, `leet mid graph`, or `another`. Prefix forms like `!ping` continue to work. Natural command parsing only activates when the first word is a supported DM command.
+- The bot owner can send `!reset` in the bot DM to clear their own DM cooldown and lockout, or `!reset @user` to clear another user's. Set `OWNER_ID` to your Discord user ID in `.env`.
+- The owner can send `!shutdown [reason]` in a DM to announce the pause in each server's updates channel and stop commands, automod, and join/leave messages. Only the owner can use `!start` in a DM to resume it; the bot posts a back-online notice to each updates channel.
+
 ## Adding the DSA question feature later
-Create `cogs/dsa.py` following the same pattern (a `Cog` subclass + `async def setup(bot)`), add `"cogs.dsa"` to `INITIAL_EXTENSIONS` in `bot.py`. No other files need to change.
+Add new command cogs following the same pattern (a `Cog` subclass + `async def setup(bot)`), then add them to `INITIAL_EXTENSIONS` in `bot.py`.

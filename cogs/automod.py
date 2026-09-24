@@ -56,6 +56,8 @@ class AutoMod(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
+        if getattr(self.bot, "is_shutdown", False):
+            return
         if self.is_exempt(message):
             return
 

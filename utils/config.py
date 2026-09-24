@@ -12,6 +12,7 @@ DEFAULTS = {
     "kick_ban_channel_id": None, # kick/mute/unmute logs
     "automod_channel_id": None,  # automod flags (spam, mass mentions, invite links)
     "update_channel_id": None,   # bot version/changelog announcements
+    "problem_channel_id": None,  # requested LeetCode problems
 
     # Automod is on by default but deliberately lenient — see cogs/automod.py.
     "automod_enabled": True,

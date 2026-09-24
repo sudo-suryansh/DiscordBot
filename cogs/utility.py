@@ -20,6 +20,8 @@ class Utility(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
+        if getattr(self.bot, "is_shutdown", False):
+            return
         welcome_channel = get_channel(member.guild, "welcome")
         if welcome_channel:
             await welcome_channel.send(
@@ -55,6 +57,8 @@ class Utility(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member):
+        if getattr(self.bot, "is_shutdown", False):
+            return
         # Leave messages no longer go to #welcome — only the logs channel.
         log_channel = get_channel(member.guild, "logs")
         if log_channel:
@@ -73,6 +77,7 @@ class Utility(commands.Cog):
                 pass
 
     @commands.hybrid_command(name="ping", description="Check the bot's latency.")
+    @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     async def ping(self, ctx: commands.Context):
         await ctx.send(f"Pong! `{round(self.bot.latency * 1000)}ms`")
 
@@ -90,16 +95,25 @@ class Utility(commands.Cog):
         await ctx.send(embed=embed)
 
     @commands.hybrid_command(name="userinfo", description="Show information about a member.")
-    @app_commands.describe(member="The member to look up (defaults to you)")
-    async def userinfo(self, ctx: commands.Context, member: discord.Member = None):
+    @app_commands.describe(member="The user to look up (defaults to you)")
+    @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+    async def userinfo(self, ctx: commands.Context, member: discord.User = None):
         member = member or ctx.author
-        embed = discord.Embed(title=str(member), color=member.color)
+        guild_member = ctx.guild.get_member(member.id) if ctx.guild else None
+        embed = discord.Embed(
+            title=str(member),
+            color=guild_member.color if guild_member else discord.Color.blurple(),
+        )
         embed.set_thumbnail(url=member.display_avatar.url)
         embed.add_field(name="ID", value=member.id)
-        embed.add_field(name="Joined server", value=member.joined_at.strftime("%b %d, %Y") if member.joined_at else "Unknown")
         embed.add_field(name="Account created", value=member.created_at.strftime("%b %d, %Y"))
-        roles = [r.mention for r in member.roles if r.name != "@everyone"]
-        embed.add_field(name="Roles", value=", ".join(roles) if roles else "None", inline=False)
+        if ctx.guild:
+            embed.add_field(
+                name="Joined server",
+                value=guild_member.joined_at.strftime("%b %d, %Y") if guild_member and guild_member.joined_at else "Not a member of this server",
+            )
+            roles = [r.mention for r in guild_member.roles if r.name != "@everyone"] if guild_member else []
+            embed.add_field(name="Roles", value=", ".join(roles) if roles else "None", inline=False)
         await ctx.send(embed=embed)
 
 

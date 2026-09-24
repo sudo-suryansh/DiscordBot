@@ -16,11 +16,13 @@ CHANNEL_KEYWORDS = {
 # Maps a channel_type -> the key it's stored under in a guild's config.json
 CONFIG_KEY_MAP = {
     "welcome": "welcome_channel_id",
+    "commands": "commands_channel_id",
     "logs": "log_channel_id",
     "modlog": "mod_log_channel_id",
     "kickban": "kick_ban_channel_id",
     "automod": "automod_channel_id",
     "updates": "update_channel_id",
+    "problem": "problem_channel_id",
 }
 
 

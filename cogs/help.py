@@ -1,4 +1,5 @@
 import discord
+from discord import app_commands
 from discord.ext import commands
 
 
@@ -14,7 +15,25 @@ class Help(commands.Cog):
         self.bot = bot
 
     @commands.hybrid_command(name="help", description="DM yourself the list of commands you have access to.")
+    @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     async def help(self, ctx: commands.Context):
+        if ctx.guild is None:
+            embed = discord.Embed(
+                title="Commands available in DMs",
+                description=(
+                    "**Light commands** · available every 20 seconds\n"
+                    "`ping` · check latency\n"
+                    "`userinfo [@user]` · look up an account\n"
+                    "`version` · check the bot version\n\n"
+                    "**Problem picks** · available every 30 seconds\n"
+                    "`leet <easy|mid|hard> [topic]`\n"
+                    "`another [difficulty] [topic]` · reuse your previous choice\n\n"
+                    "You can still put `!` before a command. DM commands are paused for an hour if more than 10 messages arrive within a minute."
+                ),
+                color=discord.Color.blurple(),
+            )
+            return await ctx.send(embed=embed)
+
         # Group visible commands by their cog, in whatever order cogs were loaded
         sections: dict[str, list[commands.Command]] = {}
 

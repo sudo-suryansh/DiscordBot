@@ -4,7 +4,7 @@
 # posts the changelog entry below to each server's #updates channel
 # automatically — no manual command needed.
 
-VERSION = "1.2.0"
+VERSION = "2.3.0"
 
 CHANGELOG = {
     "1.1.0": [
@@ -18,5 +18,50 @@ CHANGELOG = {
         "Added `/version` to check the running version and `/checkupdate` (owner-only) to manually resend the update announcement with a diagnostic report",
         "Fixed a bug where a failed #updates announcement (e.g. missing Send Messages permission) failed completely silently",
     ],
+    "1.3.0": [
+        "Added /leet to send a random LeetCode problem by difficulty and optional topic, with its statement and learning topics",
+        "Added /setprobchannel so Administrators can choose where requested problems are posted",
+    ],
+    "1.4.0": [
+        "Redesigned LeetCode problem cards with clearer sections, learning outcomes, topic tags, and a direct solve button",
+        "Added /another to repeat the last difficulty and topic after a five-minute cooldown, or choose new ones",
+    ],
+    "1.5.0": [
+        "Problem cards now display an illustration when one is included in LeetCode's statement",
+        "LeetCode requests can now be made in direct messages; private requests stay in DMs, and !another keeps working when switching between DMs and the server",
+    ],
+    "1.6.0": [
+        "Added a 30-second cooldown between all problem requests, regardless of whether /leet or /another was used",
+        "Limited /another to the five-minute window after the last problem; use /leet to start a new request after it expires",
+    ],
+    "1.7.0": [
+        "Enabled lightweight bot commands in DMs with per-user 20-second cooldowns, and LeetCode requests with 30-second cooldowns",
+        "Added a one-hour DM spam lockout after more than 10 messages or commands in one minute, with a warning before ignoring further DMs",
+    ],
+    "1.8.0": [
+        "DM commands can now be typed without a prefix while retaining ! command support",
+        "Added owner-only !reset in DMs to clear only the owner's own cooldown and DM spam lockout",
+    ],
+    "1.9.0": [
+        "Extended the owner-only DM !reset command to clear cooldowns and lockouts for a mentioned user",
+    ],
+    "2.0.0": [
+        "Reworked owner-only DM shutdown to announce its reason in each server's updates channel",
+        "Paused bot commands, automod, and join/leave activity during shutdown while preserving the owner's DM-only !start recovery command",
+    ],
+    "2.1.0": [
+        "LeetCode problem requests in servers are now channel-only by default; append dm to also send the problem privately",
+        "Bare /another repeats the previous problem's DM delivery preference",
+    ],
+    "2.2.0": [
+        "Added exact LeetCode problem-number lookup with optional DM delivery",
+        "Premium problem numbers now receive a direct notice instead of being posted as regular problems",
+    ],
+    "2.3.0": [
+        "Bot now posts a back-online notice in each server's updates channel when the owner resumes it with !start",
+    ],
+    "2.4.0": [
+    "Added `!dot <question>`: ask the AI in the channel an admin sets with `/setchannel commands`",
+],
     # "1.3.0": ["next change here"],
 }

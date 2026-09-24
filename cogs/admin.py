@@ -147,6 +147,7 @@ class AdminConfig(commands.Cog):
             "modlog": "🛠️ Mod log (warn/clear/lock/slowmode)",
             "kickban": "🔨 Kick/ban/mute log",
             "automod": "🚨 Automod flags",
+            "commands": "💬 Commands (where !dot works)",
             "updates": "🔧 Bot update announcements",
         }
         for ctype, label in labels.items():
@@ -177,11 +178,12 @@ class AdminConfig(commands.Cog):
 
     # ---------- UPDATE DIAGNOSTICS ----------
     @commands.hybrid_command(name="version", description="Show the bot's running version and last announced version.")
+    @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     async def version(self, ctx: commands.Context):
         last = get_last_announced_version()
         await ctx.send(
             f"Running version: `{VERSION}`\nLast announced in #updates: `{last or 'never'}`",
-            ephemeral=True,
+            ephemeral=ctx.guild is not None,
         )
 
     @commands.hybrid_command(
