@@ -186,6 +186,17 @@ class IntentAndApiTests(unittest.TestCase):
         self.assertTrue(dotai.is_today_task_lookup("Could you show today's LeetCode problem?"))
         self.assertTrue(dotai.is_today_task_lookup("which challenge do we have today"))
         self.assertFalse(dotai.is_today_task_lookup("How do I solve a graph problem?"))
+        self.assertFalse(dotai.is_today_task_lookup("Cancel today's task"))
+
+    def test_numbered_task_requests_parse_without_an_ai_call(self):
+        parsed = dotai.parse_numbered_task_creation(
+            "I want you to add a task to solve problem 1 of LeetCode and send the info in #tasks"
+        )
+        self.assertEqual(parsed, {"leetcode_number": 1, "channel": "#tasks"})
+        self.assertIsNone(dotai.parse_numbered_task_creation("How do I add a task for LeetCode problem 1?"))
+        self.assertFalse(dotai.should_offer_tools("Explain how LeetCode problem 1 works"))
+        selected = dotai.tools_for_question("Please post a warning for @Sam")
+        self.assertLess(len(selected), len(dotai.DOT_TOOLS))
 
     def test_leetcode_response_shape_validation(self):
         response = Mock()
@@ -200,6 +211,25 @@ class IntentAndApiTests(unittest.TestCase):
         with patch.object(dsa, "urlopen", return_value=response):
             with self.assertRaises(ValueError):
                 dsa._fetch_json(dsa.LIST_QUERY, {})
+
+    def test_numbered_problem_uses_minimal_problem_list_query(self):
+        calls = []
+
+        def fetch(query, variables):
+            calls.append(query)
+            if "questionList" in query:
+                return {"data": {"questionList": {"data": [
+                    {"questionFrontendId": "1", "titleSlug": "two-sum", "isPaidOnly": False},
+                ]}}}
+            return {"data": {"question": {
+                "questionFrontendId": "1", "titleSlug": "two-sum", "title": "Two Sum",
+                "content": "<p>Prompt</p>", "topicTags": [],
+            }}}
+
+        with patch.object(dsa, "_fetch_json", side_effect=fetch):
+            problem = dsa._fetch_numbered_problem(1)
+        self.assertEqual(problem["title"], "Two Sum")
+        self.assertEqual(calls[0], dsa.NUMBER_LIST_QUERY)
 
     def test_ai_error_messages_cover_provider_failures(self):
         forbidden = discord.Forbidden.__new__(discord.Forbidden)
@@ -315,6 +345,25 @@ class ToolLoopTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(denied["ok"])
         self.assertIn("Administrator", denied["message"])
 
+    async def test_clear_numbered_task_intent_bypasses_groq(self):
+        dot = object.__new__(dotai.DotAI)
+        dot._execute_tool = AsyncMock(return_value={"ok": True, "message": "Posted LeetCode #1 in #tasks."})
+        dot.record_usage = Mock()
+        ctx = SimpleNamespace(
+            guild=SimpleNamespace(id=1),
+            author=SimpleNamespace(id=2),
+            interaction=None,
+            reply=AsyncMock(),
+        )
+        with patch.object(dotai, "observe_interaction"), patch.object(dotai, "is_today_task_lookup", return_value=False):
+            await dotai.DotAI.dot.callback(
+                dot, ctx,
+                question="I want you to add a task to solve problem 1 of LeetCode and send the info in #tasks",
+            )
+        dot._execute_tool.assert_awaited_once_with(ctx, "create_task_today", {"leetcode_number": 1, "channel": "#tasks"})
+        ctx.reply.assert_awaited_once()
+        dot.record_usage.assert_called_once_with(1, 2, "dot")
+
     async def test_ai_failure_after_action_reports_confirmed_result(self):
         self.requests = []
         call = self._tool_call("c1", "send_channel_message", {"channel": "general", "message": "Hello"})
@@ -327,6 +376,19 @@ class ToolLoopTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("Completed: Message posted in #general.", answer)
         self.assertIn("couldn't prepare a fuller reply", answer)
+
+    async def test_failed_action_returns_result_without_another_ai_request(self):
+        self.requests = []
+        call = self._tool_call("c1", "create_task_today", {"leetcode_number": 1, "channel": "#tasks"})
+        execute = AsyncMock(return_value={"ok": False, "message": "LeetCode is temporarily unavailable."})
+        dot = await self._make_dot([self._completion(calls=[call]), self._completion(content="This should not be requested")], execute)
+        ctx = SimpleNamespace(guild=SimpleNamespace(id=1), author=SimpleNamespace(id=2))
+
+        with patch.object(dotai.DotAI, "_is_admin", return_value=True):
+            answer = await dot.ask((1, 2, "dot"), "Add LeetCode problem 1 as a task in #tasks", "system", ctx)
+
+        self.assertIn("LeetCode is temporarily unavailable", answer)
+        self.assertEqual(len(self.requests), 1)
 
     async def test_malformed_ai_followup_still_reports_action_result(self):
         self.requests = []

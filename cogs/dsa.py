@@ -36,6 +36,13 @@ query questionData($titleSlug: String!) {
   question(titleSlug: $titleSlug) { questionFrontendId title titleSlug difficulty content topicTags { name } }
 }
 """
+NUMBER_LIST_QUERY = """
+query problemsetQuestionList($categorySlug: String, $limit: Int, $skip: Int, $filters: QuestionListFilterInput) {
+  questionList(categorySlug: $categorySlug, limit: $limit, skip: $skip, filters: $filters) {
+    data { questionFrontendId titleSlug isPaidOnly }
+  }
+}
+"""
 
 LEARNING_NOTES = {
     "array": "Organizing and scanning indexed data",
@@ -100,10 +107,27 @@ def _fetch_json(query: str, variables: dict) -> dict:
     request = Request(
         LEETCODE_URL,
         data=payload,
-        headers={"Content-Type": "application/json", "User-Agent": "DSA-Server-Bot/1.0"},
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (compatible; DotDSAPracticeBot/1.0; +https://leetcode.com/)",
+            "Origin": "https://leetcode.com",
+            "Referer": "https://leetcode.com/problemset/",
+        },
     )
-    with urlopen(request, timeout=12) as response:
-        result = json.loads(response.read().decode("utf-8"))
+    result = None
+    for attempt in range(2):
+        try:
+            with urlopen(request, timeout=10) as response:
+                result = json.loads(response.read().decode("utf-8"))
+            break
+        except HTTPError as error:
+            if error.code not in {408, 425, 429, 500, 502, 503, 504} or attempt == 1:
+                raise
+            time.sleep(0.5)
+        except (URLError, TimeoutError, json.JSONDecodeError):
+            if attempt == 1:
+                raise
+            time.sleep(0.5)
     if not isinstance(result, dict):
         raise ValueError("LeetCode returned a non-object response")
     if result.get("errors"):
@@ -124,7 +148,7 @@ def _fetch_numbered_problem(question_number: int) -> dict | None:
     """Find a numbered problem across LeetCode's paginated problem listing."""
     skip = 0
     while True:
-        result = _fetch_json(LIST_QUERY, {
+        result = _fetch_json(NUMBER_LIST_QUERY, {
             "categorySlug": "algorithms", "skip": skip, "limit": 1000,
             "filters": {},
         })
