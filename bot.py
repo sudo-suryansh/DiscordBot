@@ -74,6 +74,7 @@ INITIAL_EXTENSIONS = [
     "cogs.power",
     "cogs.dsa",
     "cogs.dm_guard",
+    "cogs.daily_tasks",
 ]
 
 

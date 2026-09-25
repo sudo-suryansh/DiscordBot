@@ -49,3 +49,24 @@ def get_channel(guild: discord.Guild, channel_type: str):
         if channel:
             return channel
     return find_channel_by_keywords(guild, CHANNEL_KEYWORDS.get(channel_type, []))
+
+
+def get_command_channels(guild: discord.Guild):
+    """Return configured command channels, including the legacy single-channel setting."""
+    from utils.config import get_guild_config
+
+    cfg = get_guild_config(guild.id)
+    ids = cfg.get("command_channel_ids") or []
+    legacy_id = cfg.get("commands_channel_id")
+    if legacy_id:
+        ids = [legacy_id, *ids]
+    channels = []
+    seen = set()
+    for channel_id in ids:
+        if channel_id in seen:
+            continue
+        seen.add(channel_id)
+        channel = guild.get_channel(channel_id)
+        if channel is not None and isinstance(channel, discord.TextChannel):
+            channels.append(channel)
+    return channels

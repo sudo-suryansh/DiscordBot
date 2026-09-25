@@ -52,6 +52,18 @@ To point a feature at a specific channel instead of relying on auto-detection:
 ```
 Check what's currently active any time with `!channels`.
 
+Dot receives a directory of the server's text channels, including their category, Discord topic,
+and configured bot uses. Administrators can add a plain-language purpose with
+`!setchannelpurpose #channel what belongs here` (or `/setchannelpurpose`), and remove it with
+`!clearchannelpurpose #channel`. Dot uses these details to answer questions about where things
+belong and to identify a requested destination; it asks when a purpose or destination is unclear.
+
+Dot's `!dot` and `!review` commands can be enabled in several channels. Add each one with
+`!addcommandchannel #channel` (or `/addcommandchannel`); remove one with
+`!removecommandchannel #channel`. `!channels` lists all configured command channels.
+The existing `!setchannel commands #channel` setting remains available and resets the
+allowed command channels to that single channel.
+
 Set the channel for requested LeetCode problems with `!setprobchannel #dsa-problems` (Administrator only).
 
 ## Automod (new)
@@ -104,7 +116,8 @@ Bump `VERSION` in `version.py` and add a bullet list under it in `CHANGELOG` whe
 - `!adminrole` — show current admin role
 - `!setwelcome #channel`
 - `!setprobchannel #channel` — choose where LeetCode problems are posted
-- `!setchannel <welcome|logs|modlog|kickban|automod|updates> #channel`
+- `!setchannel <welcome|logs|modlog|kickban|automod|updates|commands> #channel`
+- `!addcommandchannel #channel` / `!removecommandchannel #channel` — manage the channels where `!dot` and `!review` work
 - `!channels` — show all current channel routing
 - `!welcomechannel` — show current welcome channel
 
@@ -112,6 +125,19 @@ Bump `VERSION` in `version.py` and add a bullet list under it in `CHANGELOG` whe
 - `!ping`
 - `!serverinfo`
 - `!userinfo [@user]`
+
+**Dot AI**
+- Add `!dm` anywhere as a standalone marker in a `!dot` question to receive the answer by direct message instead of in the channel, e.g. `!dot explain binary search !dm`. The marker is removed before Dot receives the question.
+- Dot can also carry out supported Discord actions from clear natural-language requests. Anyone can ask `!dot dm me a hi` or `!dot dm me today's task`; questions asking what today's task is are answered directly from the saved schedule (never guessed). Only server Administrators can ask it to DM another member, post in a channel, read/issue/clear warnings, kick a member, apply/remove a timeout, lock/unlock a channel, set slowmode, or clear recent messages. The bot checks its own Discord permissions and role hierarchy, disambiguates channel/member targets, disables message mentions, and logs moderation actions to the configured or detected log channels. Actions not in this list are not available through `!dot`.
+
+**Daily LeetCode tasks**
+- Start `!tasksetup` or `/tasksetup` with no arguments for the tap-through wizard. Pick a channel, plan type, duration and difficulty stages from menus; set the hour, five-minute interval, and timezone with dropdowns; then select multiple LeetCode topics or leave them blank for any topic. India is the default timezone (`Asia/Kolkata`).
+- The default progression is 7 Easy days, 7 Medium days, then Hard. Set different lengths before starting a plan with `!taskstages 10 5`. Previously sent LeetCode questions won't repeat.
+- To make a plan entirely from your own tasks, choose **Custom tasks** in the wizard. Then use `/taskadd`, choose a day from the menu, and fill out the task form. Topics and the reference link are optional; you can add up to four custom tasks per day. The prefix alternative is `!taskadd <day> Title | instructions | topic1, topic2 | optional URL`.
+- Only one schedule can run at a time. While one is active, `/taskadd` can add more custom tasks to future days; these are bundled with that day's LeetCode question in one post, one reminder, and one `!done` completion. Use `/taskstop` to choose individual plan days to cancel, or stop all remaining days; cancelling a day also cancels its posted message/reminder and prevents `!dot` from presenting it as today's task.
+- Dot receives today's LeetCode and custom task details, including topics, so members can ask `!dot I'm confused about step 2 of today's task`.
+- `!done` in the configured task channel marks the current day's task complete. Six hours after posting, the bot sends one DM reminder with the question to each non-bot member who can view the task channel and hasn't used `!done`.
+- `!taskstatus` shows the schedule. An Administrator can use natural language with `!dot` (for example, `!dot cancel today's task`, `!dot cancel day 3`, `!dot cancel days 3 and 4`, or `!dot stop all remaining tasks`) or use `/taskstop` for the selection menu. Schedule and sent-question history survive restarts.
 
 **DSA practice** (anyone)
 - `!leet <easy|mid|hard|number> [topic] [dm]` — choose a random problem by difficulty/topic, or fetch an exact LeetCode number, e.g. `!leet 20`. Add a final `dm` to also send it privately, e.g. `!leet 20 dm` or `!leet mid graph dm`.

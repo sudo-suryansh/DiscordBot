@@ -4,7 +4,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from utils.config import get_guild_config, set_guild_value
-from utils.channels import get_channel, CONFIG_KEY_MAP
+from utils.channels import get_channel, get_command_channels, CONFIG_KEY_MAP
 from utils.embeds import action_embed
 from utils.updates import announce_update
 from utils.state import get_last_announced_version
@@ -121,7 +121,7 @@ class AdminConfig(commands.Cog):
     # ---------- GENERAL CHANNEL ROUTING ----------
     @commands.hybrid_command(
         name="setchannel",
-        description="Point a bot feature (logs, modlog, kickban, automod, updates, welcome) at a specific channel.",
+        description="Point a bot feature (including commands) at a specific channel.",
     )
     @app_commands.describe(channel_type="Which feature to route", channel="The channel to send it to")
     @app_commands.choices(channel_type=CHANNEL_TYPE_CHOICES)
@@ -131,8 +131,99 @@ class AdminConfig(commands.Cog):
             return await ctx.send(
                 f"Unknown channel type. Choose from: {', '.join(CONFIG_KEY_MAP)}", ephemeral=True
             )
-        set_guild_value(ctx.guild.id, CONFIG_KEY_MAP[channel_type], channel.id)
+        if channel_type == "commands":
+            # Keep the older setting in sync for existing installations.
+            set_guild_value(ctx.guild.id, "commands_channel_id", channel.id)
+            set_guild_value(ctx.guild.id, "command_channel_ids", [channel.id])
+        else:
+            set_guild_value(ctx.guild.id, CONFIG_KEY_MAP[channel_type], channel.id)
         await ctx.send(f"`{channel_type}` will now use {channel.mention}.")
+
+    @commands.hybrid_command(
+        name="setchannelpurpose",
+        description="Tell Dot what a channel is for.",
+    )
+    @app_commands.describe(channel="The channel Dot should understand", purpose="A short description of what belongs in this channel")
+    @commands.has_permissions(administrator=True)
+    async def setchannelpurpose(self, ctx: commands.Context, channel: discord.TextChannel, *, purpose: str):
+        purpose = purpose.strip()
+        if not purpose:
+            return await ctx.send("Add a short purpose, such as `questions and help with Python`.", ephemeral=True)
+        if len(purpose) > 300:
+            return await ctx.send("Keep the channel purpose under 300 characters.", ephemeral=True)
+        cfg = get_guild_config(ctx.guild.id)
+        purposes = dict(cfg.get("channel_purposes") or {})
+        purposes[str(channel.id)] = purpose
+        set_guild_value(ctx.guild.id, "channel_purposes", purposes)
+        await ctx.send(f"I’ll remember that {channel.mention} is for: **{purpose}**")
+        await self.log_config_change(
+            ctx.guild, "Channel purpose updated", f"Set {channel.mention} purpose to: {purpose}", actor=ctx.author
+        )
+
+    @commands.hybrid_command(
+        name="clearchannelpurpose",
+        description="Remove the custom purpose saved for a channel.",
+    )
+    @app_commands.describe(channel="The channel whose custom purpose should be removed")
+    @commands.has_permissions(administrator=True)
+    async def clearchannelpurpose(self, ctx: commands.Context, channel: discord.TextChannel):
+        cfg = get_guild_config(ctx.guild.id)
+        purposes = dict(cfg.get("channel_purposes") or {})
+        if purposes.pop(str(channel.id), None) is None:
+            return await ctx.send(f"There is no custom purpose saved for {channel.mention}.", ephemeral=True)
+        set_guild_value(ctx.guild.id, "channel_purposes", purposes)
+        await ctx.send(f"Removed the custom purpose for {channel.mention}. I’ll use its channel topic and name instead.")
+        await self.log_config_change(
+            ctx.guild, "Channel purpose removed", f"Removed the custom purpose for {channel.mention}.", actor=ctx.author
+        )
+
+    @commands.hybrid_command(name="addcommandchannel", description="Allow Dot commands in an additional channel.")
+    @app_commands.describe(channel="Additional channel where /dot and /review can be used")
+    @commands.has_permissions(administrator=True)
+    async def addcommandchannel(self, ctx: commands.Context, channel: discord.TextChannel):
+        channels = get_command_channels(ctx.guild)
+        if channel.id in {item.id for item in channels}:
+            return await ctx.send(f"{channel.mention} is already a commands channel.", ephemeral=True)
+        ids = [item.id for item in channels]
+        ids.append(channel.id)
+        set_guild_value(ctx.guild.id, "command_channel_ids", ids)
+        # Keep the legacy primary channel populated for older code/config readers.
+        if not ctx.guild.get_channel(get_guild_config(ctx.guild.id).get("commands_channel_id")):
+            set_guild_value(ctx.guild.id, "commands_channel_id", channel.id)
+        await ctx.send(f"Added {channel.mention}. Dot commands are now available in {len(ids)} channel(s).")
+
+    @addcommandchannel.error
+    async def addcommandchannel_error(self, ctx: commands.Context, error):
+        if isinstance(error, commands.MissingPermissions):
+            await ctx.send("Only server Administrators can change this setting.", ephemeral=True)
+        elif isinstance(error, commands.MissingRequiredArgument):
+            await ctx.send("Choose a channel, for example `/addcommandchannel #coding-help`.", ephemeral=True)
+        else:
+            await ctx.send("Couldn't add that commands channel.", ephemeral=True)
+            raise error
+
+    @commands.hybrid_command(name="removecommandchannel", description="Remove a channel from Dot's allowed command channels.")
+    @app_commands.describe(channel="Commands channel to remove")
+    @commands.has_permissions(administrator=True)
+    async def removecommandchannel(self, ctx: commands.Context, channel: discord.TextChannel):
+        ids = [item.id for item in get_command_channels(ctx.guild) if item.id != channel.id]
+        if len(ids) == len(get_command_channels(ctx.guild)):
+            return await ctx.send(f"{channel.mention} is not a configured commands channel.", ephemeral=True)
+        set_guild_value(ctx.guild.id, "command_channel_ids", ids)
+        cfg = get_guild_config(ctx.guild.id)
+        if cfg.get("commands_channel_id") == channel.id:
+            set_guild_value(ctx.guild.id, "commands_channel_id", ids[0] if ids else None)
+        await ctx.send(f"Removed {channel.mention}. {len(ids)} commands channel(s) remain.")
+
+    @removecommandchannel.error
+    async def removecommandchannel_error(self, ctx: commands.Context, error):
+        if isinstance(error, commands.MissingPermissions):
+            await ctx.send("Only server Administrators can change this setting.", ephemeral=True)
+        elif isinstance(error, commands.MissingRequiredArgument):
+            await ctx.send("Choose a channel, for example `/removecommandchannel #coding-help`.", ephemeral=True)
+        else:
+            await ctx.send("Couldn't remove that commands channel.", ephemeral=True)
+            raise error
 
     @commands.hybrid_command(name="channels", description="Show which channel each bot feature is currently using.")
     async def channels(self, ctx: commands.Context):
@@ -147,7 +238,6 @@ class AdminConfig(commands.Cog):
             "modlog": "🛠️ Mod log (warn/clear/lock/slowmode)",
             "kickban": "🔨 Kick/ban/mute log",
             "automod": "🚨 Automod flags",
-            "commands": "💬 Commands (where !dot works)",
             "updates": "🔧 Bot update announcements",
         }
         for ctype, label in labels.items():
@@ -157,6 +247,12 @@ class AdminConfig(commands.Cog):
                 value=channel.mention if channel else "*(not found — set with /setchannel)*",
                 inline=False,
             )
+        command_channels = get_command_channels(ctx.guild)
+        embed.add_field(
+            name="💬 Commands (where /dot and /review work)",
+            value=", ".join(channel.mention for channel in command_channels) if command_channels else "*(not set — use /addcommandchannel)*",
+            inline=False,
+        )
         await ctx.send(embed=embed)
 
     # ---------- SYNC (push new/changed commands to Discord without restarting) ----------
@@ -210,6 +306,8 @@ class AdminConfig(commands.Cog):
     @revokeadminrole.error
     @setwelcome.error
     @setchannel.error
+    @setchannelpurpose.error
+    @clearchannelpurpose.error
     async def admin_config_error(self, ctx: commands.Context, error):
         if isinstance(error, commands.MissingPermissions):
             await ctx.send("Only server Administrators can change this setting.", ephemeral=True)

@@ -4,7 +4,7 @@
 # posts the changelog entry below to each server's #updates channel
 # automatically — no manual command needed.
 
-VERSION = "2.3.0"
+VERSION = "2.18.0"
 
 CHANGELOG = {
     "1.1.0": [
@@ -61,7 +61,61 @@ CHANGELOG = {
         "Bot now posts a back-online notice in each server's updates channel when the owner resumes it with !start",
     ],
     "2.4.0": [
-    "Added `!dot <question>`: ask the AI in the channel an admin sets with `/setchannel commands`",
-],
+        "Added `!dot <question>`: ask the AI in the channel an admin sets with `/setchannel commands`",
+    ],
+    "2.5.0": [
+        "Added `/limits` (owner-only): view remaining Groq API quota after the last `!dot`/`!review` use",
+        "Added `/savage on|off` (admin-only): toggle Dot's roast personality for this server",
+        "Added `!review <code>`: get an AI code review — bugs, edge cases, and complexity, hints first",
+        "Added `!dotstats`: see total AI questions asked, top askers, and the busiest hour",
+    ],
+    "2.6.0": [
+        "Added `/addcommandchannel` and `/removecommandchannel` so Dot's AI commands can be enabled in multiple channels",
+    ],
+    "2.7.0": [
+        "Updated Dot's AI instructions to describe only features the bot actually provides",
+    ],
+    "2.8.0": [
+        "Added the `!dm` marker to send `!dot` answers to the requester by direct message",
+    ],
+    "2.9.0": [
+        "Added scheduled daily LeetCode tasks with a no-repeat question history, `!done` tracking, and six-hour DM reminders",
+    ],
+    "2.10.0": [
+        "Made LeetCode difficulty stage lengths configurable and added fully custom daily task plans",
+        "Dot now receives the current daily task and its topics as context for `!dot` questions",
+    ],
+    "2.11.0": [
+        "Simplified task setup, added optional multi-topic LeetCode filters and a form for custom tasks",
+        "Prevented overlapping schedules and bundled custom work with running LeetCode plans",
+    ],
+    "2.12.0": [
+        "Added a tap-through setup wizard for channels, plan type, duration, stages, time, timezone, and optional topics",
+        "Added a day picker and support for up to four custom tasks on each day",
+    ],
+    "2.13.0": [
+        "Made !dot an interactive assistant for approved, permission-checked Discord actions, including channel posts, moderation, channel locks, message cleanup, and private task delivery",
+        "Improved custom-task form error reporting and timezone fallback when saving tasks",
+    ],
+    "2.14.0": [
+        "Expanded Dot's natural-language actions to send direct messages and remove member timeouts",
+        "Passed verified admin status into Dot's AI context and made action replies concise and consistent",
+    ],
+    "2.15.0": [
+        "Expanded Dot's admin tools to warnings, warning cleanup, and channel slowmode",
+        "Tightened natural-language action handling so Dot uses available tools instead of making up refusals",
+    ],
+    "2.16.0": [
+        "Dot now answers direct questions about today's task from the saved local-date schedule, or clearly reports when no task is posted",
+        "Added an admin-only natural-language lookup for a member's recorded warnings",
+    ],
+    "2.17.0": [
+        "Changed /taskstop into a task-day picker with selected-day cancellation or stopping all remaining tasks",
+        "Added admin-only natural-language task cancellation and ensured cancellations stop reminders and hide cancelled tasks from Dot and !done",
+    ],
+    "2.18.0": [
+        "Dot now uses server channel names, categories, topics, configured bot roles, and admin-written channel purposes to answer channel questions and route channel actions",
+        "Added Administrator-only !setchannelpurpose and !clearchannelpurpose commands",
+    ],
     # "1.3.0": ["next change here"],
 }

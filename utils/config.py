@@ -13,6 +13,19 @@ DEFAULTS = {
     "automod_channel_id": None,  # automod flags (spam, mass mentions, invite links)
     "update_channel_id": None,   # bot version/changelog announcements
     "problem_channel_id": None,  # requested LeetCode problems
+    "daily_task_channel_id": None,
+    "daily_task_days": None,
+    "daily_task_time": None,
+    "daily_task_timezone": "UTC",
+    "daily_task_start_date": None,
+    "daily_task_enabled": False,
+    "daily_task_type": "leetcode",
+    "daily_task_easy_days": 7,
+    "daily_task_medium_days": 7,
+    "daily_task_custom_tasks": {},
+    "daily_task_topics": [],
+    # Optional administrator-written explanations for channels, keyed by channel ID.
+    "channel_purposes": {},
 
     # Automod is on by default but deliberately lenient — see cogs/automod.py.
     "automod_enabled": True,
