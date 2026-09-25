@@ -76,6 +76,18 @@ async def on_command_error(ctx, error):
         # The DM guard and shutdown switch intentionally handle or silence these checks.
         return
     root_error = _unwrap_error(error)
+    if isinstance(root_error, commands.CommandOnCooldown):
+        logger.info(
+            "Prefix command %s is cooling down for user %s (%.2fs remaining)",
+            getattr(ctx.command, "qualified_name", "unknown"),
+            getattr(ctx.author, "id", "unknown"),
+            root_error.retry_after,
+        )
+        try:
+            await ctx.send(_error_message(error), ephemeral=ctx.interaction is not None)
+        except discord.HTTPException:
+            logger.info("Could not send cooldown response for prefix command %s", getattr(ctx.command, "qualified_name", "unknown"))
+        return
     if root_error.__traceback__ is not None:
         logger.error(
             "Prefix command %s failed: %r",
@@ -93,7 +105,12 @@ async def on_command_error(ctx, error):
 
 @bot.tree.error
 async def on_app_command_error(interaction, error):
-    logger.error("Slash command %s failed: %r", getattr(getattr(interaction, "command", None), "qualified_name", "unknown"), error, exc_info=(type(error), error, error.__traceback__))
+    root_error = _unwrap_error(error)
+    command_name = getattr(getattr(interaction, "command", None), "qualified_name", "unknown")
+    if isinstance(root_error, discord.app_commands.CommandOnCooldown):
+        logger.info("Slash command %s is cooling down for user %s (%.2fs remaining)", command_name, interaction.user.id, root_error.retry_after)
+    else:
+        logger.error("Slash command %s failed: %r", command_name, error, exc_info=(type(error), error, error.__traceback__))
     if isinstance(error, discord.app_commands.CheckFailure) and (
         interaction.response.is_done() or interaction.guild is None or getattr(bot, "is_shutdown", False)
     ):

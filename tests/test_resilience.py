@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 import discord
+from discord.ext import commands
 
 from cogs import daily_tasks, dsa, dotai
 from cogs.automod import AutoMod
@@ -232,6 +233,26 @@ class IntentAndApiTests(unittest.TestCase):
             name = tool["function"]["name"]
             self.assertGreater(len(dotai.TOOL_GUIDANCE[name]), 100)
             self.assertTrue(tool["function"]["description"])
+
+
+class CooldownLogTests(unittest.IsolatedAsyncioTestCase):
+    async def test_prefix_cooldown_is_a_normal_info_event_not_an_error(self):
+        bot_module = __import__("bot")
+        command = SimpleNamespace(qualified_name="dot")
+        ctx = SimpleNamespace(
+            command=command,
+            author=SimpleNamespace(id=123),
+            interaction=None,
+            send=AsyncMock(),
+        )
+        error = commands.CommandOnCooldown(
+            commands.Cooldown(1, 15), 2.65, commands.BucketType.user,
+        )
+        with patch.object(bot_module.logger, "info") as info, patch.object(bot_module.logger, "error") as error_log:
+            await bot_module.on_command_error(ctx, error)
+        info.assert_called_once()
+        error_log.assert_not_called()
+        self.assertIn("3s", ctx.send.await_args.args[0])
 
 
 class ToolLoopTests(unittest.IsolatedAsyncioTestCase):
