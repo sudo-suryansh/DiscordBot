@@ -3,7 +3,7 @@
 import asyncio
 from collections import defaultdict
 from datetime import date, datetime, time as day_time, timedelta, timezone
-import json
+import logging
 import os
 import random
 import re
@@ -18,12 +18,15 @@ from cogs.dsa import DETAIL_QUERY, LEARNING_NOTES, LIST_QUERY, _clean_statement,
 from utils.channels import get_channel
 from utils.config import get_guild_config, set_guild_value
 from utils.embeds import action_embed
+from utils.json_store import load_json, save_json
+from utils.member_records import record_task_completion
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
 TASK_STATE_FILE = os.path.join(DATA_DIR, "daily_tasks.json")
 TIME_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
 REMINDER_AFTER = timedelta(hours=6)
 RETRY_AFTER = timedelta(hours=1)
+logger = logging.getLogger(__name__)
 
 
 def _get_timezone(name: str):
@@ -34,20 +37,31 @@ def _get_timezone(name: str):
 
 def _load_state() -> dict:
     os.makedirs(DATA_DIR, exist_ok=True)
-    if not os.path.exists(TASK_STATE_FILE):
-        return {"guilds": {}}
-    with open(TASK_STATE_FILE, "r", encoding="utf-8") as file:
-        data = json.load(file)
-    data.setdefault("guilds", {})
+    data = load_json(TASK_STATE_FILE, {"guilds": {}})
+    if not isinstance(data.get("guilds"), dict):
+        print(f"[daily tasks] Invalid guilds object in {TASK_STATE_FILE}; resetting task state index")
+        data["guilds"] = {}
+    for guild_id, guild_state in list(data["guilds"].items()):
+        if not isinstance(guild_state, dict):
+            logger.error("Ignoring malformed daily-task state for guild %s", guild_id)
+            data["guilds"][guild_id] = {"tasks": {}}
+            continue
+        if not isinstance(guild_state.get("tasks"), dict):
+            logger.error("Ignoring malformed task list for guild %s", guild_id)
+            guild_state["tasks"] = {}
+        for date_key, record in list(guild_state["tasks"].items()):
+            if not isinstance(record, dict):
+                logger.error("Ignoring malformed task record for guild %s on %s", guild_id, date_key)
+                guild_state["tasks"][date_key] = {}
+            elif record.get("task") is not None and not isinstance(record["task"], dict):
+                logger.error("Ignoring malformed task payload for guild %s on %s", guild_id, date_key)
+                record["task"] = None
     return data
 
 
 def _save_state(data: dict) -> None:
     os.makedirs(DATA_DIR, exist_ok=True)
-    temp_path = TASK_STATE_FILE + ".tmp"
-    with open(temp_path, "w", encoding="utf-8") as file:
-        json.dump(data, file, indent=2)
-    os.replace(temp_path, TASK_STATE_FILE)
+    save_json(TASK_STATE_FILE, data)
 
 
 def get_current_task_context(guild_id: int) -> str | None:
@@ -431,18 +445,18 @@ class _TaskStopDaySelect(discord.ui.Select):
         options = [
             discord.SelectOption(
                 label=entry["label"][:100],
-                value=str(entry["day"]),
+                value=entry["date"],
                 description=("Posted task bundle" if entry["posted"] else "Scheduled task bundle")[:100],
-                default=entry["day"] in owner.selected_days,
+                default=entry["date"] in owner.selected_dates,
             )
             for entry in entries
         ]
         super().__init__(placeholder="Select plan days to cancel", options=options, min_values=0, max_values=max(1, len(options)), row=0)
 
     async def callback(self, interaction: discord.Interaction):
-        page_days = {entry["day"] for entry in self.owner.page_entries()}
-        self.owner.selected_days.difference_update(page_days)
-        self.owner.selected_days.update(int(value) for value in self.values)
+        page_dates = {entry["date"] for entry in self.owner.page_entries()}
+        self.owner.selected_dates.difference_update(page_dates)
+        self.owner.selected_dates.update(self.values)
         self.owner.build()
         await interaction.response.edit_message(content=self.owner.page_text(), view=self.owner)
 
@@ -471,12 +485,12 @@ class _TaskStopActionButton(discord.ui.Button):
         super().__init__(
             label="Stop all remaining tasks" if stop_all else "Cancel selected days",
             style=discord.ButtonStyle.danger if stop_all else discord.ButtonStyle.primary,
-            disabled=not stop_all and not owner.selected_days,
+            disabled=not stop_all and not owner.selected_dates,
             row=2,
         )
 
     async def callback(self, interaction: discord.Interaction):
-        days = [entry["day"] for entry in self.owner.entries] if self.stop_all else sorted(self.owner.selected_days)
+        days = [entry["date"] for entry in self.owner.entries] if self.stop_all else sorted(self.owner.selected_dates)
         message = await self.owner.cog.cancel_plan_days(
             interaction.guild, days, stop_schedule=self.stop_all, actor=interaction.user
         )
@@ -492,7 +506,7 @@ class TaskStopView(discord.ui.View):
         self.entries = entries
         self.page = 0
         self.max_page = max(0, (len(entries) - 1) // 25)
-        self.selected_days = set()
+        self.selected_dates = set()
         self.build()
 
     def page_entries(self):
@@ -500,7 +514,10 @@ class TaskStopView(discord.ui.View):
 
     def page_text(self):
         cfg = get_guild_config(self.guild_id)
-        selected = ", ".join(f"Day {day}" for day in sorted(self.selected_days)) or "none"
+        selected = ", ".join(
+            next((entry["label"] for entry in self.entries if entry["date"] == date_key), date_key)
+            for date_key in sorted(self.selected_dates)
+        ) or "none"
         lines = [
             "**Cancel scheduled task days**",
             "Choose one or more days, then cancel them. Cancelling a day cancels its whole bundle, including any custom tasks.",
@@ -568,7 +585,7 @@ class DailyTasks(commands.Cog):
             tz = _get_timezone(cfg.get("daily_task_timezone", "UTC"))
         except (ZoneInfoNotFoundError, TypeError):
             print(f"[daily tasks] Invalid timezone configured for {guild.name}")
-            return
+            tz = timezone.utc
 
         state = _load_state()
         guild_state = state["guilds"].setdefault(str(guild.id), {"tasks": {}})
@@ -576,7 +593,9 @@ class DailyTasks(commands.Cog):
         now = datetime.now(tz)
         if cfg.get("daily_task_enabled"):
             await self.maybe_post_task(guild, cfg, guild_state, state, now)
-        await self.maybe_send_reminders(guild, cfg, guild_state, state, datetime.now(timezone.utc))
+        now_utc = datetime.now(timezone.utc)
+        await self.maybe_post_one_off_tasks(guild, guild_state, state, now_utc)
+        await self.maybe_send_reminders(guild, cfg, guild_state, state, now_utc)
         start_value = cfg.get("daily_task_start_date")
         duration = cfg.get("daily_task_days")
         if cfg.get("daily_task_enabled") and start_value and duration:
@@ -670,6 +689,20 @@ class DailyTasks(commands.Cog):
                         "posted": True,
                         "label": f"Today · {task.get('title', 'Posted task')}",
                     })
+                listed_dates = {entry["date"] for entry in entries}
+                for date_key, pending in guild_state.items():
+                    if date_key in listed_dates or pending.get("cancelled_at") or pending.get("sent_at") or not pending.get("scheduled_at"):
+                        continue
+                    try:
+                        task_date = date.fromisoformat(date_key)
+                    except ValueError:
+                        continue
+                    if task_date < today:
+                        continue
+                    task = pending.get("task") or {}
+                    when = "Tomorrow" if task_date == today + timedelta(days=1) else task_date.isoformat()
+                    entries.append({"day": 0, "date": date_key, "posted": False, "label": f"{when} · {task.get('title', 'Scheduled task')}"})
+                entries.sort(key=lambda entry: entry["date"])
                 return entries
         # A stopped schedule may still have today's already-posted task to cancel.
         record = guild_state.get(today.isoformat(), {})
@@ -677,6 +710,20 @@ class DailyTasks(commands.Cog):
             task = record.get("task") or {}
             day = int(task.get("day", 1))
             entries.append({"day": day, "date": today.isoformat(), "posted": True, "label": f"Day {day} · Today · {task.get('title', 'Posted task')}"})
+        listed_dates = {entry["date"] for entry in entries}
+        for date_key, pending in guild_state.items():
+            if date_key in listed_dates or pending.get("cancelled_at") or pending.get("sent_at") or not pending.get("scheduled_at"):
+                continue
+            try:
+                task_date = date.fromisoformat(date_key)
+            except ValueError:
+                continue
+            if task_date < today:
+                continue
+            task = pending.get("task") or {}
+            when = "Tomorrow" if task_date == today + timedelta(days=1) else task_date.isoformat()
+            entries.append({"day": 0, "date": date_key, "posted": False, "label": f"{when} · {task.get('title', 'Scheduled task')}"})
+        entries.sort(key=lambda entry: entry["date"])
         return entries
 
     async def cancel_plan_days(self, guild: discord.Guild, days, *, stop_schedule: bool = False, actor=None) -> str:
@@ -685,8 +732,8 @@ class DailyTasks(commands.Cog):
 
     async def _cancel_plan_days_locked(self, guild: discord.Guild, days, *, stop_schedule: bool = False, actor=None) -> str:
         cfg = get_guild_config(guild.id)
-        entries = {entry["day"]: entry for entry in self.get_cancelable_task_days(guild.id)}
-        selected = sorted({int(day) for day in days if int(day) in entries})
+        entries = {entry["date"]: entry for entry in self.get_cancelable_task_days(guild.id)}
+        selected = sorted({str(day) for day in days if str(day) in entries})
         if stop_schedule:
             set_guild_value(guild.id, "daily_task_enabled", False)
         if not selected:
@@ -696,8 +743,8 @@ class DailyTasks(commands.Cog):
         guild_state = state["guilds"].setdefault(str(guild.id), {"tasks": {}})
         guild_state.setdefault("tasks", {})
         records_to_edit = []
-        for day in selected:
-            entry = entries[day]
+        for date_key in selected:
+            entry = entries[date_key]
             record = guild_state["tasks"].setdefault(entry["date"], {})
             if record.get("cancelled_at"):
                 continue
@@ -713,7 +760,7 @@ class DailyTasks(commands.Cog):
                 try:
                     message = channel.get_partial_message(record["message_id"])
                     await message.edit(
-                        content=f"🚫 Day {entry['day']} was cancelled by an administrator.",
+                        content=f"🚫 {entry['label']} was cancelled by an administrator.",
                         embed=None,
                         view=None,
                         allowed_mentions=discord.AllowedMentions.none(),
@@ -728,7 +775,7 @@ class DailyTasks(commands.Cog):
             description = "The schedule was stopped and all remaining posted/planned days were cancelled."
         else:
             title = "Daily Task Days Cancelled"
-            description = "Cancelled " + ", ".join(f"Day {day}" for day in selected) + "."
+            description = "Cancelled " + ", ".join(entries[date_key]["label"] for date_key in selected) + "."
         if actor is not None:
             log_channel = get_channel(guild, "modlog")
             if log_channel:
@@ -739,7 +786,8 @@ class DailyTasks(commands.Cog):
                     print(f"[daily tasks] couldn't write cancellation log: {error!r}")
         if stop_schedule:
             return f"Schedule stopped. Cancelled {len(records_to_edit)} remaining task day(s); their reminders and future posts are stopped."
-        return f"Cancelled {len(records_to_edit)} task day(s): " + ", ".join(f"Day {day}" for day in selected) + "."
+        labels = [entries[date_key]["label"] for date_key in selected]
+        return f"Cancelled {len(records_to_edit)} task day(s): " + "; ".join(labels) + "."
 
     async def maybe_post_task(self, guild, cfg, guild_state, state, now, *, force=False):
         start_value = cfg.get("daily_task_start_date")
@@ -843,8 +891,53 @@ class DailyTasks(commands.Cog):
             task_record["reminded_ids"] = []
             _save_state(state)
             print(f"[daily tasks] Sent day {day_number}/{duration} to {guild.name}: {task['title']}")
-        except Exception as error:
-            print(f"[daily tasks] Could not post today's task in {guild.name}: {error}")
+        except Exception:
+            logger.exception("Could not fetch or post daily LeetCode task for guild %s", guild.id)
+
+    async def maybe_post_one_off_tasks(self, guild, guild_state, state, now_utc):
+        """Publish pending standalone tasks after their saved UTC send time."""
+        changed = False
+        for date_key, record in list(guild_state.get("tasks", {}).items()):
+            scheduled_at = record.get("scheduled_at")
+            if not scheduled_at or record.get("sent_at") or record.get("cancelled_at"):
+                continue
+            try:
+                due_at = datetime.fromisoformat(scheduled_at)
+                if due_at.tzinfo is None:
+                    due_at = due_at.replace(tzinfo=timezone.utc)
+            except (TypeError, ValueError):
+                print(f"[daily tasks] Invalid one-off task time in {guild.name}: {scheduled_at!r}")
+                record["cancelled_at"] = now_utc.isoformat()
+                changed = True
+                continue
+            if now_utc < due_at:
+                continue
+            channel = guild.get_channel(record.get("channel_id"))
+            task = record.get("task")
+            if channel is None or not task:
+                print(f"[daily tasks] Pending task {date_key} in {guild.name} has no channel or task data")
+                continue
+            permissions = channel.permissions_for(guild.me)
+            if not permissions.send_messages or not permissions.embed_links:
+                print(f"[daily tasks] Missing Send Messages/Embed Links in #{channel.name} for scheduled task")
+                continue
+            try:
+                message = await channel.send(embed=_task_embed(task), allowed_mentions=discord.AllowedMentions.none())
+            except discord.HTTPException as error:
+                print(f"[daily tasks] Could not post scheduled task in #{channel.name}: {error!r}")
+                continue
+            record.update({
+                "sent_at": now_utc.isoformat(),
+                "message_id": message.id,
+                "completed_ids": [],
+                "reminded_ids": [],
+                "reminder_complete": False,
+            })
+            record.pop("scheduled_at", None)
+            changed = True
+            print(f"[daily tasks] Posted scheduled one-off task to #{channel.name}: {task.get('title', 'Task')}")
+        if changed:
+            _save_state(state)
 
     async def maybe_send_reminders(self, guild, cfg, guild_state, state, now_utc):
         for task_record in guild_state["tasks"].values():
@@ -1013,6 +1106,121 @@ class DailyTasks(commands.Cog):
                 url=url, leetcode_number=leetcode_number, actor=actor,
             )
 
+    async def schedule_task_tomorrow(self, guild, channel, *, title="", instructions="", topics=None, url="", leetcode_number=None, send_time="", actor=None):
+        async with self.guild_locks[guild.id]:
+            return await self._schedule_task_tomorrow_locked(
+                guild, channel, title=title, instructions=instructions, topics=topics,
+                url=url, leetcode_number=leetcode_number, send_time=send_time, actor=actor,
+            )
+
+    async def _schedule_task_tomorrow_locked(self, guild, channel, *, title="", instructions="", topics=None, url="", leetcode_number=None, send_time="", actor=None):
+        cfg = get_guild_config(guild.id)
+        try:
+            tz = _get_timezone(cfg.get("daily_task_timezone", "UTC"))
+        except (ZoneInfoNotFoundError, TypeError):
+            tz = timezone.utc
+        local_now = datetime.now(tz)
+        tomorrow = local_now.date() + timedelta(days=1)
+
+        task = None
+        if leetcode_number is not None:
+            if isinstance(leetcode_number, bool):
+                return False, "Enter a valid LeetCode problem number."
+            try:
+                problem_number = int(leetcode_number)
+            except (TypeError, ValueError):
+                return False, "Enter a valid LeetCode problem number."
+            if not 1 <= problem_number <= 5000:
+                return False, "Choose a LeetCode problem number between 1 and 5000."
+            try:
+                problem = await asyncio.to_thread(_fetch_numbered_problem, problem_number)
+            except Exception:
+                logger.exception("LeetCode lookup failed for problem #%s", problem_number)
+                return False, "I couldn't fetch that LeetCode problem right now. Please try again shortly."
+            if not problem or problem.get("isPaidOnly"):
+                return False, f"LeetCode problem {problem_number} could not be posted (it may be premium or unavailable)."
+            if not problem.get("title") or not problem.get("titleSlug"):
+                return False, f"LeetCode returned incomplete details for problem {problem_number}. Please try again later."
+            statement, _images = _clean_statement(problem.get("content", ""))
+            task = {
+                "difficulty": str(problem.get("difficulty", "MEDIUM")).upper(),
+                "title": f"{problem.get('questionFrontendId', problem_number)}. {problem['title']}",
+                "slug": problem["titleSlug"],
+                "url": f"https://leetcode.com/problems/{problem['titleSlug']}/",
+                "statement": statement or "Open LeetCode to read the full problem statement.",
+                "topics": [tag["name"] for tag in problem.get("topicTags", [])],
+            }
+        else:
+            title = str(title or "").strip()
+            instructions = str(instructions or "").strip()
+            url = str(url or "").strip()
+            topic_values = topics if isinstance(topics, (list, tuple)) else []
+            topics = [str(topic).strip()[:100] for topic in topic_values if isinstance(topic, str) and topic.strip()][:10]
+            if not title or not instructions:
+                return False, "A custom task needs both a short title and instructions."
+            if len(title) > 80 or len(instructions) > 3300:
+                return False, "Keep the title under 80 characters and instructions under 3300."
+            try:
+                parsed_url = urlsplit(url) if url else None
+            except ValueError:
+                return False, "The optional task URL is malformed."
+            if url and (len(url) > 2000 or parsed_url.scheme not in {"https", "http"} or not parsed_url.netloc):
+                return False, "The optional task URL must be a valid http:// or https:// link."
+            task = {"difficulty": "CUSTOM", "title": title, "statement": instructions, "topics": topics, "url": url}
+
+        task["day"] = 1
+        plan_day = None
+        if cfg.get("daily_task_enabled") and cfg.get("daily_task_start_date"):
+            try:
+                plan_day = (tomorrow - date.fromisoformat(cfg["daily_task_start_date"])).days + 1
+            except ValueError:
+                plan_day = None
+        plan_active_tomorrow = bool(plan_day and 1 <= plan_day <= int(cfg.get("daily_task_days", 0) or 0))
+        if plan_active_tomorrow:
+            plan_channel_id = cfg.get("daily_task_channel_id")
+            if not plan_channel_id:
+                return False, "Tomorrow's plan has no configured task channel. Please repair the plan settings before adding a task."
+            if plan_channel_id and channel.id != plan_channel_id:
+                return False, f"Tomorrow's active plan uses <#{plan_channel_id}>. Add this task there so the post, !done, and reminders stay together."
+            custom_tasks = dict(cfg.get("daily_task_custom_tasks", {}))
+            entries = custom_tasks.get(str(plan_day), [])
+            if isinstance(entries, dict):
+                entries = [entries]
+            else:
+                entries = list(entries)
+            if len(entries) >= 4:
+                return False, "Tomorrow's scheduled bundle already has four custom tasks."
+            if any(str(item.get("title", "")).casefold() == task["title"].casefold() for item in entries):
+                return False, f"A task titled **{task['title']}** is already scheduled for tomorrow."
+            custom_tasks[str(plan_day)] = [*entries, {key: task[key] for key in ("title", "statement", "topics", "url", "slug") if key in task}]
+            set_guild_value(guild.id, "daily_task_custom_tasks", custom_tasks)
+            tz_name = cfg.get("daily_task_timezone", "UTC")
+            return True, f"Scheduled **{task['title']}** in <#{plan_channel_id}> with tomorrow's plan (Day {plan_day}) at {cfg.get('daily_task_time', 'the configured time')} {tz_name}."
+
+        if send_time:
+            send_time = str(send_time).strip()
+        else:
+            send_time = str(cfg.get("daily_task_time") or "09:00")
+        match = TIME_RE.fullmatch(send_time)
+        if not match:
+            return False, "Use a valid local send time in HH:MM format, such as 09:00."
+        date_key = tomorrow.isoformat()
+        state = _load_state()
+        guild_state = state["guilds"].setdefault(str(guild.id), {"tasks": {}})
+        guild_state.setdefault("tasks", {})
+        record = guild_state["tasks"].setdefault(date_key, {})
+        if record.get("sent_at") and not record.get("cancelled_at"):
+            return False, f"A task is already posted for {date_key}; add to that task bundle instead."
+        if record.get("scheduled_at") and not record.get("cancelled_at"):
+            return False, f"A task is already scheduled for {date_key}. Cancel it before scheduling another."
+        if record.get("cancelled_at"):
+            for key in ("cancelled_at", "cancelled_by", "reminder_complete", "sent_at", "scheduled_at", "message_id", "completed_ids", "reminded_ids"):
+                record.pop(key, None)
+        due_at = datetime.combine(tomorrow, day_time(int(match.group(1)), int(match.group(2))), tzinfo=tz).astimezone(timezone.utc)
+        record.update({"task": task, "channel_id": channel.id, "scheduled_at": due_at.isoformat()})
+        _save_state(state)
+        return True, f"Scheduled **{task['title']}** for {date_key} at {send_time} ({cfg.get('daily_task_timezone', 'UTC')}) in {channel.mention}."
+
     async def _create_task_today_locked(self, guild, channel, *, title="", instructions="", topics=None, url="", leetcode_number=None, actor=None):
         """Post or append today's task while keeping the task bundle and reminders consistent."""
         cfg = get_guild_config(guild.id)
@@ -1036,8 +1244,8 @@ class DailyTasks(commands.Cog):
                 return False, "Choose a LeetCode problem number between 1 and 5000."
             try:
                 problem = await asyncio.to_thread(_fetch_numbered_problem, problem_number)
-            except Exception as error:
-                print(f"[daily tasks] LeetCode lookup failed for #{problem_number}: {error!r}")
+            except Exception:
+                logger.exception("LeetCode lookup failed for problem #%s", problem_number)
                 return False, "I couldn't fetch that LeetCode problem right now. Please try again shortly."
             if not problem:
                 return False, f"I couldn't find LeetCode problem {problem_number}."
@@ -1354,6 +1562,7 @@ class DailyTasks(commands.Cog):
         completed.add(ctx.author.id)
         record["completed_ids"] = list(completed)
         _save_state(state)
+        record_task_completion(ctx.guild.id, ctx.author.id, today)
         await ctx.send(f"✅ {ctx.author.mention} marked today's task done!", allowed_mentions=discord.AllowedMentions.none())
 
 

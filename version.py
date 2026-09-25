@@ -4,7 +4,7 @@
 # posts the changelog entry below to each server's #updates channel
 # automatically — no manual command needed.
 
-VERSION = "2.19.0"
+VERSION = "2.20.0"
 
 CHANGELOG = {
     "1.1.0": [
@@ -119,6 +119,10 @@ CHANGELOG = {
     ],
     "2.19.0": [
         "Dot can create today's custom or numbered LeetCode task from a natural-language admin request, bundle it with an existing task, and track !done and six-hour reminders",
+    ],
+    "2.20.0": [
+        "Dot can schedule a one-off task for tomorrow and open the daily plan setup wizard from natural-language admin requests",
+        "Tomorrow tasks follow the active plan's channel and time, or use the configured task time (09:00 by default) and can be cancelled from task controls",
     ],
     # "1.3.0": ["next change here"],
 }

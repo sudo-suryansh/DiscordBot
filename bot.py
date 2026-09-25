@@ -1,5 +1,6 @@
 import os
 import asyncio
+import logging
 from keep_alive import keep_alive
 import discord
 from discord.ext import commands
@@ -35,6 +36,78 @@ intents.message_content = True   # kept for now; not required once everything is
 intents.members = True           # required for join/leave events, member lookups
 
 bot = commands.Bot(command_prefix=get_command_prefix, intents=intents, help_command=None)
+logger = logging.getLogger("dot")
+
+
+def _unwrap_error(error):
+    while isinstance(error, (commands.CommandInvokeError, discord.app_commands.CommandInvokeError)):
+        error = error.original
+    return error
+
+
+def _error_message(error, *, interaction=False):
+    error = _unwrap_error(error)
+    if isinstance(error, (commands.CommandOnCooldown, discord.app_commands.CommandOnCooldown)):
+        return f"Please wait {int(error.retry_after + 0.999)}s before trying again."
+    if isinstance(error, (commands.MissingRequiredArgument, commands.BadArgument, commands.UserInputError, discord.app_commands.TransformerError)):
+        return "Some command details are missing or invalid. Check the command arguments and try again."
+    if isinstance(error, (commands.MissingPermissions, discord.app_commands.MissingPermissions)):
+        return "You don't have permission to use that command."
+    if isinstance(error, (commands.BotMissingPermissions, discord.app_commands.BotMissingPermissions)):
+        return "I don't have the Discord permissions needed to complete that action."
+    if isinstance(error, (commands.CheckFailure, discord.app_commands.CheckFailure)):
+        return "I couldn't run that command because one of its requirements wasn't met."
+    if isinstance(error, discord.Forbidden):
+        return "Discord denied that action. Check my permissions and the target's role or channel settings."
+    if isinstance(error, discord.NotFound):
+        return "I couldn't find that Discord item; it may have been removed."
+    if isinstance(error, discord.HTTPException):
+        return "Discord couldn't complete that action just now. Please try again shortly."
+    if interaction:
+        return "Something went wrong while handling that command. Please try again shortly."
+    return "Something went wrong while handling that command. Please try again shortly."
+
+
+@bot.event
+async def on_command_error(ctx, error):
+    if isinstance(error, commands.CommandNotFound):
+        return
+    if isinstance(error, commands.CheckFailure) and (ctx.guild is None or getattr(bot, "is_shutdown", False)):
+        # The DM guard and shutdown switch intentionally handle or silence these checks.
+        return
+    root_error = _unwrap_error(error)
+    if root_error.__traceback__ is not None:
+        logger.error(
+            "Prefix command %s failed: %r",
+            getattr(ctx.command, "qualified_name", "unknown"),
+            root_error,
+            exc_info=(type(root_error), root_error, root_error.__traceback__),
+        )
+    else:
+        logger.error("Prefix command %s failed: %r", getattr(ctx.command, "qualified_name", "unknown"), error)
+    try:
+        await ctx.send(_error_message(error), ephemeral=ctx.interaction is not None)
+    except discord.HTTPException:
+        logger.exception("Could not send error response for prefix command %s", getattr(ctx.command, "qualified_name", "unknown"))
+
+
+@bot.tree.error
+async def on_app_command_error(interaction, error):
+    logger.error("Slash command %s failed: %r", getattr(getattr(interaction, "command", None), "qualified_name", "unknown"), error, exc_info=(type(error), error, error.__traceback__))
+    if isinstance(error, discord.app_commands.CheckFailure) and (
+        interaction.response.is_done() or interaction.guild is None or getattr(bot, "is_shutdown", False)
+    ):
+        return
+    if interaction.response.is_done() and getattr(bot, "is_shutdown", False):
+        return
+    try:
+        message = _error_message(error, interaction=True)
+        if interaction.response.is_done():
+            await interaction.followup.send(message, ephemeral=True)
+        else:
+            await interaction.response.send_message(message, ephemeral=True)
+    except discord.HTTPException:
+        logger.exception("Could not send slash-command error response")
 
 
 @bot.event
@@ -75,6 +148,7 @@ INITIAL_EXTENSIONS = [
     "cogs.dsa",
     "cogs.dm_guard",
     "cogs.daily_tasks",
+    "cogs.member_records",
 ]
 
 

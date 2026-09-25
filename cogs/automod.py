@@ -159,6 +159,8 @@ class AutoMod(commands.Cog):
     @app_commands.describe(count="Messages allowed", seconds="...within this many seconds")
     @is_mod()
     async def automod_spamlimit(self, ctx: commands.Context, count: int, seconds: int):
+        if not 1 <= count <= 100 or not 1 <= seconds <= 3600:
+            return await ctx.send("Use 1–100 messages and a 1–3600 second window.", ephemeral=True)
         set_guild_value(ctx.guild.id, "automod_spam_count", count)
         set_guild_value(ctx.guild.id, "automod_spam_seconds", seconds)
         await ctx.send(f"Spam threshold set to {count} messages per {seconds}s.")
@@ -166,12 +168,16 @@ class AutoMod(commands.Cog):
     @automod.command(name="mentionlimit", description="Set the max mentions allowed in one message.")
     @is_mod()
     async def automod_mentionlimit(self, ctx: commands.Context, max_mentions: int):
+        if not 0 <= max_mentions <= 100:
+            return await ctx.send("The mention limit must be between 0 and 100.", ephemeral=True)
         set_guild_value(ctx.guild.id, "automod_max_mentions", max_mentions)
         await ctx.send(f"Max mentions per message set to {max_mentions}.")
 
     @automod.command(name="mutetime", description="Set how long spammers get timed out for.")
     @is_mod()
     async def automod_mutetime(self, ctx: commands.Context, minutes: int):
+        if not 1 <= minutes <= 40320:
+            return await ctx.send("Timeout duration must be between 1 and 40320 minutes (28 days).", ephemeral=True)
         set_guild_value(ctx.guild.id, "automod_mute_minutes", minutes)
         await ctx.send(f"Automod timeout duration set to {minutes} minutes.")
 

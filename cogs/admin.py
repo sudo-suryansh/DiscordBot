@@ -239,6 +239,7 @@ class AdminConfig(commands.Cog):
             "kickban": "🔨 Kick/ban/mute log",
             "automod": "🚨 Automod flags",
             "updates": "🔧 Bot update announcements",
+            "achievements": "🏅 LeetCode solution screenshots",
         }
         for ctype, label in labels.items():
             channel = get_channel(ctx.guild, ctype)

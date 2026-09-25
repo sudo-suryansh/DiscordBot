@@ -11,6 +11,7 @@ CHANNEL_KEYWORDS = {
     "kickban": ["kicks-bans-mutes", "kick-ban", "kicksbansmutes", "kicks-bans"],
     "automod": ["malcious-activity", "malicious-activity", "automod"],
     "updates": ["updates", "update"],
+    "achievements": ["achievements", "achievments"],
 }
 
 # Maps a channel_type -> the key it's stored under in a guild's config.json
@@ -23,6 +24,7 @@ CONFIG_KEY_MAP = {
     "automod": "automod_channel_id",
     "updates": "update_channel_id",
     "problem": "problem_channel_id",
+    "achievements": "achievements_channel_id",
 }
 
 

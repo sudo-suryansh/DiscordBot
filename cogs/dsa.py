@@ -3,11 +3,13 @@
 import asyncio
 from html.parser import HTMLParser
 import json
+import logging
 import random
 import re
 import time
 from urllib.request import Request, urlopen
 from urllib.parse import urljoin
+from urllib.error import HTTPError, URLError
 
 import discord
 from discord import app_commands
@@ -18,6 +20,7 @@ from utils.config import set_guild_value
 
 
 LEETCODE_URL = "https://leetcode.com/graphql/"
+logger = logging.getLogger(__name__)
 REQUEST_COOLDOWN = 30
 ANOTHER_WINDOW = 5 * 60
 LIST_QUERY = """
@@ -100,7 +103,21 @@ def _fetch_json(query: str, variables: dict) -> dict:
         headers={"Content-Type": "application/json", "User-Agent": "DSA-Server-Bot/1.0"},
     )
     with urlopen(request, timeout=12) as response:
-        return json.loads(response.read().decode("utf-8"))
+        result = json.loads(response.read().decode("utf-8"))
+    if not isinstance(result, dict):
+        raise ValueError("LeetCode returned a non-object response")
+    if result.get("errors"):
+        messages = [str(item.get("message", "GraphQL error"))[:300] for item in result["errors"] if isinstance(item, dict)]
+        raise ValueError("LeetCode GraphQL error: " + "; ".join(messages or ["unknown error"]))
+    if not isinstance(result.get("data"), dict):
+        raise ValueError("LeetCode response did not include a data object")
+    if "questionList" in query:
+        listing = result["data"].get("questionList")
+        if not isinstance(listing, dict) or not isinstance(listing.get("data"), list):
+            raise ValueError("LeetCode problem list response has an unexpected shape")
+    if "questionData" in query and not isinstance(result["data"].get("question"), dict):
+        raise ValueError("LeetCode problem detail response has an unexpected shape")
+    return result
 
 
 def _fetch_numbered_problem(question_number: int) -> dict | None:
@@ -303,8 +320,27 @@ class LeetCode(commands.Cog):
                 problem = detail.get("data", {}).get("question")
             if not problem:
                 raise ValueError("LeetCode returned no problem details")
+        except HTTPError as error:
+            logger.warning("LeetCode returned HTTP %s for user %s", error.code, ctx.author.id)
+            if error.code == 429:
+                message = "LeetCode is rate limiting requests right now. Please try again in a minute."
+            elif error.code >= 500:
+                message = "LeetCode is having a service problem. Please try again shortly."
+            else:
+                message = "LeetCode rejected the problem request. Please try again shortly."
+            await ctx.send(message, ephemeral=not is_dm)
+            return None
+        except (URLError, TimeoutError) as error:
+            logger.warning("LeetCode connection failed for user %s: %r", ctx.author.id, error)
+            await ctx.send("I couldn't connect to LeetCode. Please try again shortly.", ephemeral=not is_dm)
+            return None
+        except (ValueError, KeyError, TypeError) as error:
+            logger.exception("LeetCode returned invalid problem data for user %s: %r", ctx.author.id, error)
+            await ctx.send("LeetCode returned an unexpected response. Please try again later.", ephemeral=not is_dm)
+            return None
         except Exception:
-            await ctx.send("I couldn't fetch a problem from LeetCode right now. Please try again shortly.")
+            logger.exception("Unexpected LeetCode lookup failure for user %s", ctx.author.id)
+            await ctx.send("I couldn't fetch a problem from LeetCode right now. Please try again shortly.", ephemeral=not is_dm)
             return None
 
         embed, view = _make_problem_embed(problem, ctx.author, difficulty)

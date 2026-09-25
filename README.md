@@ -116,7 +116,7 @@ Bump `VERSION` in `version.py` and add a bullet list under it in `CHANGELOG` whe
 - `!adminrole` — show current admin role
 - `!setwelcome #channel`
 - `!setprobchannel #channel` — choose where LeetCode problems are posted
-- `!setchannel <welcome|logs|modlog|kickban|automod|updates|commands> #channel`
+- `!setchannel <welcome|logs|modlog|kickban|automod|updates|achievements|commands> #channel`
 - `!addcommandchannel #channel` / `!removecommandchannel #channel` — manage the channels where `!dot` and `!review` work
 - `!channels` — show all current channel routing
 - `!welcomechannel` — show current welcome channel
@@ -125,10 +125,14 @@ Bump `VERSION` in `version.py` and add a bullet list under it in `CHANGELOG` whe
 - `!ping`
 - `!serverinfo`
 - `!userinfo [@user]`
+  In a server, `userinfo` also shows task completion days and streaks, unique LeetCode questions recorded, and achievement-posting streaks.
+- `!help` or `/help` DMs you an interactive tour and your available commands. The first startup of the new version sends the tour once to each human member of a configured Dot server; new members receive it when they join. Successful deliveries are saved so restarts do not resend it. Using `!help` deliberately sends it again to you.
 
 **Dot AI**
 - Add `!dm` anywhere as a standalone marker in a `!dot` question to receive the answer by direct message instead of in the channel, e.g. `!dot explain binary search !dm`. The marker is removed before Dot receives the question.
-- Dot can also carry out supported Discord actions from clear natural-language requests. Anyone can ask `!dot dm me a hi` or `!dot dm me today's task`; questions asking what today's task is are answered directly from the saved schedule (never guessed). Server Administrators can ask it to create today's custom or numbered LeetCode task in the task channel, add a task to an existing daily bundle, DM another member, post a regular channel message, read/issue/clear warnings, kick a member, apply/remove a timeout, lock/unlock a channel, set slowmode, or clear recent messages. Numbered problems use official LeetCode details; new tasks are tracked by `!done` and six-hour reminders. The bot checks its own Discord permissions and role hierarchy, disambiguates channel/member targets, disables message mentions, and logs moderation actions to the configured or detected log channels. Actions not in this list are not available through `!dot`.
+- Dot can also carry out supported Discord actions from clear natural-language requests. Anyone can ask `!dot dm me a hi` or `!dot dm me today's task`; questions asking what today's task is are answered directly from the saved schedule (never guessed). Server Administrators can create a task for today, schedule a one-off task for tomorrow, open the daily-plan setup wizard with `!dot create a fresh plan`, add a task to an existing daily bundle, DM another member, post a regular channel message, read/issue/clear warnings, kick a member, apply/remove a timeout, lock/unlock a channel, set slowmode, or clear recent messages. Tomorrow tasks use the active plan's channel/time, or the configured task time and timezone (09:00 if none is configured); they are tracked by `!done` and six-hour reminders and can be cancelled with `/taskstop` or `!dot cancel tomorrow's task`. Numbered problems use official LeetCode details. The bot checks its own Discord permissions and role hierarchy, disambiguates channel/member targets, disables message mentions, and logs moderation actions to the configured or detected log channels. Actions not in this list are not available through `!dot`.
+- Non-admins can ask Dot to DM only themselves; only an Administrator can ask Dot to DM another member. Personalization learns only from messages sent directly to `!dot`, stores aggregate tone counters (not message text), and uses existing local task/solution totals. It adds no AI calls. Use `!dot erase my memory` or `!forgetme`/`/forgetme` to clear personalization and recent Dot chat history; this does not remove task completions, streaks, or LeetCode records.
+- Tool intent examples and expected actions live in `tests/evals/dot_tool_intents.json`. Run `python -m unittest discover -v` for offline regression checks. To compare the configured model against the intent set without performing Discord actions, set `GROQ_API_KEY` and run `python -m tests.run_dot_eval`; the evaluator mocks every action tool.
 
 **Daily LeetCode tasks**
 - Start `!tasksetup` or `/tasksetup` with no arguments for the tap-through wizard. Pick a channel, plan type, duration and difficulty stages from menus; set the hour, five-minute interval, and timezone with dropdowns; then select multiple LeetCode topics or leave them blank for any topic. India is the default timezone (`Asia/Kolkata`).
@@ -138,6 +142,7 @@ Bump `VERSION` in `version.py` and add a bullet list under it in `CHANGELOG` whe
 - Dot receives today's LeetCode and custom task details, including topics, so members can ask `!dot I'm confused about step 2 of today's task`.
 - `!done` in the configured task channel marks the current day's task complete. Six hours after posting, the bot sends one DM reminder with the question to each non-bot member who can view the task channel and hasn't used `!done`.
 - `!taskstatus` shows the schedule. An Administrator can use natural language with `!dot` (for example, `!dot cancel today's task`, `!dot cancel day 3`, `!dot cancel days 3 and 4`, or `!dot stop all remaining tasks`) or use `/taskstop` for the selection menu. Schedule and sent-question history survive restarts.
+- Configure the solution screenshot channel with `/setchannel achievements #achievements` (the prefix form is also supported). Dot checks image attachments there using the configured Groq key and `GROQ_VISION_MODEL` (default `qwen/qwen3.8-27b`); only clearly recognized accepted LeetCode submissions with an identifiable problem are counted. Identical images and repeat problems do not increase unique question totals. `!userinfo` shows current and best streaks. Screenshot streak dates use the daily task timezone, falling back to UTC.
 
 **DSA practice** (anyone)
 - `!leet <easy|mid|hard|number> [topic] [dm]` — choose a random problem by difficulty/topic, or fetch an exact LeetCode number, e.g. `!leet 20`. Add a final `dm` to also send it privately, e.g. `!leet 20 dm` or `!leet mid graph dm`.

@@ -101,8 +101,8 @@ class Moderation(commands.Cog):
         for i, w in enumerate(warns, start=1):
             mod = ctx.guild.get_member(w["moderator_id"])
             embed.add_field(
-                name=f"#{i} — {w['reason']}",
-                value=f"By {mod.mention if mod else w['moderator_id']}",
+                name=f"#{i} — {w.get('reason', 'No reason recorded')}",
+                value=f"By {mod.mention if mod else w.get('moderator_id', 'unknown')}",
                 inline=False,
             )
         await ctx.send(embed=embed)

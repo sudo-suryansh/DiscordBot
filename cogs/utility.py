@@ -1,18 +1,22 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from utils.motivation import generate_welcome_dm
 from utils.channels import get_channel
 from utils.embeds import action_embed
+from utils.member_records import get_member_record
+from utils.config import get_guild_config
 
 
 class Utility(commands.Cog):
     """Non-moderation commands, plus join/leave events (events aren't commands,
     so the ! vs / conversion doesn't touch them).
 
-    Joins: a friendly public message + DM go to the welcome channel, same as
-    before. Leaves no longer post in #welcome — they, along with a join audit
+    Joins: a friendly public message goes to the welcome channel; the Help cog
+    sends the interactive Dot introduction by DM. Leaves no longer post in #welcome —
+    they, along with a join audit
     entry, go to the logs channel instead."""
 
     def __init__(self, bot: commands.Bot):
@@ -28,17 +32,6 @@ class Utility(commands.Cog):
                 f"Welcome to the server, {member.mention}! 🎉 "
                 f"Check the rules and intro yourself. Happy grinding on DSA!"
             )
-
-        # Best-effort personalized DM — many users have DMs closed to
-        # non-friends, so this fails silently rather than erroring out
-        # or spamming the public channel about it.
-        try:
-            dm_text = generate_welcome_dm(member.display_name)
-            await member.send(dm_text)
-        except discord.Forbidden:
-            pass  # user has DMs disabled for this server — nothing we can do
-        except discord.HTTPException:
-            pass  # transient Discord error — not worth failing the join event over
 
         log_channel = get_channel(member.guild, "logs")
         if log_channel:
@@ -114,6 +107,27 @@ class Utility(commands.Cog):
             )
             roles = [r.mention for r in guild_member.roles if r.name != "@everyone"] if guild_member else []
             embed.add_field(name="Roles", value=", ".join(roles) if roles else "None", inline=False)
+            cfg = get_guild_config(ctx.guild.id)
+            try:
+                stats_day = datetime.now(ZoneInfo(cfg.get("daily_task_timezone", "UTC"))).date()
+            except (ZoneInfoNotFoundError, TypeError):
+                stats_day = datetime.now(timezone.utc).date()
+            stats = get_member_record(ctx.guild.id, member.id, today=stats_day)
+            embed.add_field(
+                name="Task progress",
+                value=(f"**{stats['task_total']}** task day(s) completed\n"
+                       f"🔥 Current task streak: **{stats['task_streak']}** day(s)\n"
+                       f"🏆 Best task streak: **{stats['task_longest_streak']}** day(s)"),
+                inline=True,
+            )
+            embed.add_field(
+                name="LeetCode achievements",
+                value=(f"**{stats['questions_solved']}** unique question(s) solved\n"
+                       f"🔥 Current posting streak: **{stats['solution_streak']}** day(s)\n"
+                       f"🏆 Best posting streak: **{stats['solution_longest_streak']}** day(s)\n"
+                       f"Unconfirmed screenshots: **{stats['random_screenshots']}**"),
+                inline=True,
+            )
         await ctx.send(embed=embed)
 
 
