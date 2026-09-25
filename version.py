@@ -4,7 +4,7 @@
 # posts the changelog entry below to each server's #updates channel
 # automatically — no manual command needed.
 
-VERSION = "2.18.0"
+VERSION = "2.19.0"
 
 CHANGELOG = {
     "1.1.0": [
@@ -116,6 +116,9 @@ CHANGELOG = {
     "2.18.0": [
         "Dot now uses server channel names, categories, topics, configured bot roles, and admin-written channel purposes to answer channel questions and route channel actions",
         "Added Administrator-only !setchannelpurpose and !clearchannelpurpose commands",
+    ],
+    "2.19.0": [
+        "Dot can create today's custom or numbered LeetCode task from a natural-language admin request, bundle it with an existing task, and track !done and six-hour reminders",
     ],
     # "1.3.0": ["next change here"],
 }

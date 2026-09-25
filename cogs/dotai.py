@@ -71,6 +71,7 @@ CAPABILITY_RULES = (
     "today's posted task. Only an authorized server admin may ask you to DM another server member, "
     "send a message to a channel, read/issue/clear member warnings, kick a member, apply/remove a timeout, "
     "lock/unlock a channel, set slowmode, clear recent messages, or cancel selected/all daily-task days. "
+    "An authorized admin can also create a task for today in the configured task channel, including a specific LeetCode problem number. "
     "Use a tool whenever the user clearly "
     "asks for one of these actions; do not answer "
     "with a promise, fake refusal, or instructions to do it manually when a matching tool exists. "
@@ -113,6 +114,7 @@ DOT_TOOLS = [
     {"type": "function", "function": {"name": "clear_member_warnings", "description": "Clear all recorded warnings for a server member. Administrator only.", "parameters": {"type": "object", "properties": {"member": {"type": "string"}}, "required": ["member"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "read_member_warnings", "description": "Look up a member's warning count and recorded warning reasons. Administrator only.", "parameters": {"type": "object", "properties": {"member": {"type": "string"}}, "required": ["member"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "cancel_task_days", "description": "Cancel today's task, one or more specified plan days, or all remaining daily tasks and stop the schedule. Administrator only. Cancels the whole bundle for each selected plan day, including its reminder.", "parameters": {"type": "object", "properties": {"target": {"type": "string", "enum": ["today", "day", "days", "all"], "description": "today cancels today's bundle; day cancels one day; days cancels the listed days; all stops and cancels all remaining tasks"}, "day": {"type": "integer", "minimum": 1, "maximum": 365}, "days": {"type": "array", "items": {"type": "integer", "minimum": 1, "maximum": 365}, "maxItems": 25}}, "required": ["target"], "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "create_task_today", "description": "Create and post a task for today. Administrator only. If a LeetCode problem number is given, fetch its official title, statement, URL, and topics. If there is already a task posted today, add this as another task in the same task bundle; if a scheduled plan has not posted yet, include it in today's scheduled bundle and publish that bundle now. Use the configured task channel unless the user clearly names another channel.", "parameters": {"type": "object", "properties": {"channel": {"type": "string", "description": "Destination channel name or mention; omit to use the configured task channel"}, "title": {"type": "string", "description": "Short task title for a custom task"}, "instructions": {"type": "string", "description": "Task prompt or instructions for a custom task"}, "topics": {"type": "array", "items": {"type": "string"}, "maxItems": 10}, "url": {"type": "string", "description": "Optional resource link for a custom task"}, "leetcode_number": {"type": "integer", "minimum": 1, "maximum": 5000, "description": "Optional LeetCode problem number"}}, "additionalProperties": False}}},
     {"type": "function", "function": {"name": "set_channel_lock", "description": "Lock or unlock a text channel for @everyone. Administrator only.", "parameters": {"type": "object", "properties": {"channel": {"type": "string"}, "locked": {"type": "boolean"}, "reason": {"type": "string"}}, "required": ["channel", "locked"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "set_channel_slowmode", "description": "Set channel slowmode in seconds; 0 disables it. Administrator only, maximum 21600 seconds.", "parameters": {"type": "object", "properties": {"channel": {"type": "string"}, "seconds": {"type": "integer", "minimum": 0, "maximum": 21600}}, "required": ["channel", "seconds"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "clear_recent_messages", "description": "Delete a specified number of recent messages in a text channel (2 to 50). Administrator only.", "parameters": {"type": "object", "properties": {"channel": {"type": "string"}, "count": {"type": "integer", "minimum": 2, "maximum": 50}}, "required": ["channel", "count"], "additionalProperties": False}}},
@@ -472,6 +474,37 @@ class DotAI(commands.Cog):
                 return {"ok": False, "message": "Choose today, a plan day, selected plan days, or all remaining tasks."}
             result = await task_cog.cancel_plan_days(guild, days, stop_schedule=stop_schedule, actor=ctx.author)
             return {"ok": True, "message": result}
+
+        if name == "create_task_today":
+            task_cog = self.bot.get_cog("DailyTasks")
+            if task_cog is None:
+                return {"ok": False, "message": "The daily-task service is not running."}
+            channel_value = str(args.get("channel") or "").strip()
+            if channel_value:
+                channel, ambiguous = self._resolve_channel(guild, channel_value)
+                if ambiguous:
+                    return {"ok": False, "message": "More than one channel matches that destination. Ask for a channel mention."}
+                if channel is None:
+                    return {"ok": False, "message": "I couldn't find that text channel."}
+            else:
+                channel_id = get_guild_config(guild.id).get("daily_task_channel_id")
+                channel = guild.get_channel(channel_id) if channel_id else None
+                if channel is None:
+                    return {"ok": False, "message": "No task channel is configured. Name a destination channel or have an admin set one first."}
+            permissions = channel.permissions_for(guild.me)
+            if not permissions.send_messages or not permissions.embed_links:
+                return {"ok": False, "message": f"I need Send Messages and Embed Links in {channel.mention} to post tasks."}
+            ok, message = await task_cog.create_task_today(
+                guild,
+                channel,
+                title=str(args.get("title") or ""),
+                instructions=str(args.get("instructions") or ""),
+                topics=args.get("topics") or [],
+                url=str(args.get("url") or ""),
+                leetcode_number=args.get("leetcode_number"),
+                actor=ctx.author,
+            )
+            return {"ok": ok, "message": message}
 
         if name == "send_channel_message":
             channel, ambiguous = self._resolve_channel(guild, str(args.get("channel", "")))
