@@ -4,7 +4,7 @@
 # posts the changelog entry below to each server's #updates channel
 # automatically — no manual command needed.
 
-VERSION = "2.20.0"
+VERSION = "2.21.0"
 
 CHANGELOG = {
     "1.1.0": [
@@ -123,6 +123,12 @@ CHANGELOG = {
     "2.20.0": [
         "Dot can schedule a one-off task for tomorrow and open the daily plan setup wizard from natural-language admin requests",
         "Tomorrow tasks follow the active plan's channel and time, or use the configured task time (09:00 by default) and can be cancelled from task controls",
+    ],
+    "2.21.0": [
+        "Dot answers questions about member names, task and LeetCode streaks, completion totals, solved problems, join dates, and roles from verified saved records or Discord data; missing facts are clearly reported instead of guessed",
+        "Dot can fetch LeetCode problems from natural-language requests and route numbered LeetCode task requests directly into the task workflow",
+        "Administrators can ask Dot to create, edit, or delete a named task on one plan day or an inclusive range; Dot asks for missing details before acting",
+        "Improved task lifecycle handling for multi-day edits, cancellation, completion, and reminders, including checking all posted tasks are reachable before changing a range",
     ],
     # "1.3.0": ["next change here"],
 }

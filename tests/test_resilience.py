@@ -4,7 +4,7 @@ import os
 import tempfile
 import unittest
 from collections import defaultdict, deque
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
@@ -51,6 +51,47 @@ class JsonStoreTests(unittest.TestCase):
 
 
 class MemberRecordTests(unittest.TestCase):
+    def test_dot_member_streak_uses_guild_task_timezone(self):
+        guild = SimpleNamespace(id=10, members=[])
+        requester = SimpleNamespace(id=20, display_name="Member", name="member")
+        with patch.object(dotai, "get_guild_config", return_value={"daily_task_timezone": "Asia/Kolkata"}), \
+             patch.object(dotai, "get_member_record", return_value={
+                 "task_dates": ["2026-09-25"], "task_total": 1,
+                 "task_streak": 1, "task_longest_streak": 1,
+                 "solution_dates": [], "solutions": [], "questions_solved": 0,
+                 "solution_streak": 0, "solution_longest_streak": 0,
+             }) as get_record:
+            with patch.object(dotai, "ZoneInfo", return_value=timezone.utc) as zone_info:
+                answer = dotai._member_fact_answer(guild, requester, "what is my task streak?")
+
+        self.assertIn("current task streak", answer)
+        zone_info.assert_called_once_with("Asia/Kolkata")
+        self.assertEqual(get_record.call_args.kwargs["today"], datetime.now(timezone.utc).date())
+
+    def test_dot_progress_question_returns_saved_task_total(self):
+        guild = SimpleNamespace(id=10, members=[])
+        requester = SimpleNamespace(id=20, display_name="Member", name="member")
+        record = {
+            "task_dates": ["2026-09-24"], "task_total": 1,
+            "task_streak": 0, "task_longest_streak": 1,
+            "solution_dates": [], "solutions": [], "questions_solved": 0,
+            "solution_streak": 0, "solution_longest_streak": 0,
+        }
+        with (
+            patch.object(dotai, "get_guild_config", return_value={"daily_task_timezone": "UTC"}),
+            patch.object(dotai, "ZoneInfo", return_value=timezone.utc),
+            patch.object(dotai, "get_member_record", return_value=record),
+        ):
+            answer = dotai._member_fact_answer(guild, requester, "how is my progress?")
+        self.assertIn("completed **1** distinct daily task days", answer)
+
+    def test_dot_does_not_confuse_external_usernames_with_discord_identity(self):
+        guild = SimpleNamespace(id=10, members=[])
+        requester = SimpleNamespace(id=20, display_name="Member", name="member")
+        answer = dotai._member_fact_answer(guild, requester, "what is my GitHub username?")
+        self.assertIn("don't have a verified GitHub username", answer)
+        self.assertNotIn("(username: **member**)", answer)
+
     def test_streaks_count_consecutive_calendar_days_only(self):
         current, longest = member_records.streak_for_dates(
             ["2026-09-20", "2026-09-21", "2026-09-23", "2026-09-24"],
@@ -197,6 +238,56 @@ class IntentAndApiTests(unittest.TestCase):
         self.assertFalse(dotai.should_offer_tools("Explain how LeetCode problem 1 works"))
         selected = dotai.tools_for_question("Please post a warning for @Sam")
         self.assertLess(len(selected), len(dotai.DOT_TOOLS))
+
+    def test_natural_language_problem_request_bypasses_member_fact_lookup(self):
+        guild = SimpleNamespace(id=1, members=[])
+        requester = SimpleNamespace(id=2, display_name="Member", name="member")
+        for question in (
+            "Find me an easy LeetCode problem",
+            "Can you recommend a graph question?",
+            "Fetch LeetCode problem 42",
+            "I want a medium graph LeetCode problem",
+            "How do I solve a LeetCode problem?",
+            "Why is my LeetCode solution timing out?",
+            "How many LeetCode problems are there?",
+        ):
+            self.assertIsNone(dotai._member_fact_answer(guild, requester, question), question)
+        self.assertFalse(dotai.is_natural_leetcode_lookup("How do I solve LeetCode problem 42?"))
+        self.assertTrue(dotai.is_natural_leetcode_lookup("What is LeetCode problem 42?"))
+
+    def test_natural_leetcode_parser_keeps_topics_from_casual_wording(self):
+        self.assertEqual(
+            dotai.parse_natural_leetcode_request("give me an easy graph LeetCode problem"),
+            ("easy", "graph"),
+        )
+        self.assertEqual(
+            dotai.parse_natural_leetcode_request("get a medium dynamic programming problem on LeetCode"),
+            ("medium", "dynamic programming"),
+        )
+        self.assertEqual(
+            dotai.parse_natural_leetcode_request("recommend me a dynamic programming LeetCode question"),
+            ("mid", "dynamic programming"),
+        )
+        self.assertEqual(dotai.parse_natural_leetcode_request("fetch LeetCode problem number 42"), ("42", None))
+        self.assertEqual(dotai.parse_natural_leetcode_request("fetch LeetCode 42"), ("42", None))
+
+    def test_intent_router_matches_action_examples_and_ignores_quoted_commands(self):
+        path = Path(__file__).parent / "evals" / "dot_tool_intents.json"
+        cases = json.loads(path.read_text(encoding="utf-8"))
+        for case in cases:
+            expected = case["expected_tool"]
+            available = {tool["function"]["name"] for tool in dotai.tools_for_question(case["text"])}
+            if expected not in (None, "clarify", "direct_task_lookup"):
+                self.assertIn(expected, available, case["text"])
+            elif expected is None:
+                self.assertFalse(dotai.should_offer_tools(case["text"]), case["text"])
+        quoted = "Summarize this sentence: 'kick Ravi from the server'"
+        self.assertFalse(dotai.should_offer_tools(quoted))
+        self.assertEqual(dotai.tools_for_question(quoted), [])
+        self.assertEqual(
+            {tool["function"]["name"] for tool in dotai.tools_for_question("How many warnings does Maya have?")},
+            {"read_member_warnings"},
+        )
 
     def test_leetcode_response_shape_validation(self):
         response = Mock()

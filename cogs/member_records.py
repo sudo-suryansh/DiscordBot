@@ -74,12 +74,12 @@ class MemberRecords(commands.Cog):
                     continue
                 result = await self._classify(client, mime, image)
                 if result.get("leetcode") is not True or result.get("solved") is not True:
-                    record_non_leetcode_image(message.guild.id, message.author.id, digest)
+                    record_non_leetcode_image(message.guild.id, message.author.id, digest, message.author.name, message.author.display_name)
                     continue
                 title = str(result.get("title") or "").strip()
                 slug = str(result.get("slug") or "").strip()
                 if not title and not slug:
-                    record_non_leetcode_image(message.guild.id, message.author.id, digest)
+                    record_non_leetcode_image(message.guild.id, message.author.id, digest, message.author.name, message.author.display_name)
                     continue
                 try:
                     day = datetime.now(ZoneInfo(cfg.get("daily_task_timezone", "UTC"))).date().isoformat()
@@ -88,6 +88,7 @@ class MemberRecords(commands.Cog):
                 is_new, _new_day = record_solution(
                     message.guild.id, message.author.id, day, digest,
                     title or slug, slug or None,
+                    username=message.author.name, display_name=message.author.display_name,
                 )
                 if is_new:
                     from utils.member_records import get_member_record

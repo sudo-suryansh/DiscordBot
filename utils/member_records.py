@@ -54,9 +54,19 @@ def _user_record(data, guild_id, user_id):
     })
 
 
-def record_task_completion(guild_id, user_id, day):
+def _remember_identity(record, username=None, display_name=None):
+    # These are lightweight identity snapshots to make saved activity readable
+    # in exports and when a member later changes their Discord name.
+    if username:
+        record["username"] = str(username)[:100]
+    if display_name:
+        record["display_name"] = str(display_name)[:100]
+
+
+def record_task_completion(guild_id, user_id, day, username=None, display_name=None):
     data = _load()
     record = _user_record(data, guild_id, user_id)
+    _remember_identity(record, username, display_name)
     dates = set(record.setdefault("task_dates", []))
     if day not in dates:
         dates.add(day)
@@ -78,9 +88,10 @@ def get_member_record(guild_id, user_id, today=None):
     return result
 
 
-def record_non_leetcode_image(guild_id, user_id, digest=None):
+def record_non_leetcode_image(guild_id, user_id, digest=None, username=None, display_name=None):
     data = _load()
     record = _user_record(data, guild_id, user_id)
+    _remember_identity(record, username, display_name)
     if digest and digest in record.setdefault("screenshots_seen", []):
         return
     if digest:
@@ -95,10 +106,11 @@ def has_seen_screenshot(guild_id, user_id, digest):
     return digest in record.get("screenshots_seen", [])
 
 
-def record_solution(guild_id, user_id, day, digest, title, slug=None):
+def record_solution(guild_id, user_id, day, digest, title, slug=None, username=None, display_name=None):
     """Store a confirmed solution once per image and once per identifiable problem."""
     data = _load()
     record = _user_record(data, guild_id, user_id)
+    _remember_identity(record, username, display_name)
     seen = set(record.setdefault("screenshots_seen", []))
     if digest in seen:
         return False, False

@@ -1,162 +1,282 @@
-# DSA Server Bot
+# Dot — Discord DSA & Server Assistant
 
-## Structure
+Dot is a Discord bot for coding communities. It brings together LeetCode practice, scheduled task plans, member progress, an AI assistant, moderation utilities, and server activity logs. Members can ask in natural language; administrators get guided task and configuration workflows.
+
+> **At a glance:** ask Dot a question with `!dot`, fetch a problem with `!leet`, track a solution by posting an accepted-submission screenshot, or complete the daily task with `!done`.
+
+## Contents
+
+- [Features](#features)
+- [Get started](#get-started)
+- [First-time server setup](#first-time-server-setup)
+- [Commands](#commands)
+- [Dot, the assistant](#dot-the-assistant)
+- [LeetCode practice](#leetcode-practice)
+- [Daily task plans](#daily-task-plans)
+- [Progress and achievements](#progress-and-achievements)
+- [Moderation and automod](#moderation-and-automod)
+- [Privacy and saved data](#privacy-and-saved-data)
+- [Updates and releases](#updates-and-releases)
+- [Development](#development)
+
+## Features
+
+- **A practical DSA assistant:** explain concepts, answer server questions, review code, look up current task details, and perform supported server actions with permission checks.
+- **LeetCode on demand:** request random problems by difficulty/topic, fetch a problem by number, repeat a recent request, or ask Dot in ordinary language.
+- **Daily practice plans:** schedule LeetCode or custom tasks for 1–365 days, with a timezone, send time, optional topic filters, task completion, and reminders.
+- **Task management in conversation:** administrators can create, edit, or delete a named custom task for one plan day or an inclusive range. Dot asks a follow-up when required details are missing.
+- **Member progress:** track completed task days and streaks, plus accepted LeetCode submissions recognized from screenshots.
+- **Community utilities:** welcome and activity logs, server/member info, warnings, timeouts, kicks, channel controls, and configurable automod.
+- **Persistent configuration:** per-server settings and activity data are saved locally as JSON and survive bot restarts.
+
+## Get started
+
+### Requirements
+
+- Python 3.10 or newer
+- A Discord application and bot
+- A Groq API key for `!dot`, `!review`, and screenshot recognition
+
+### Install and run
+
+```bash
+git clone <your-repository-url>
+cd dot
+python -m venv .venv
 ```
-bot.py                 # entry point — loads cogs, starts the bot, announces updates
-version.py              # bump this + add a changelog entry whenever you ship a change
-cogs/
-  moderation.py          # kick, mute, unmute, warn, warnings, clearwarns, clear, lock, unlock, slowmode
-  automod.py              # NEW — configurable anti-spam (flooding, mass mentions, invite links)
-  admin.py                # !setadminrole, !setwelcome, !setchannel, !channels — config, Administrator-only
-  utility.py               # ping, serverinfo, userinfo, welcome/leave events
-  dsa.py                   # LeetCode problem picker and problem-channel setup
-utils/
-  storage.py              # JSON-backed warning storage
-  config.py                # JSON-backed per-server config (admin role, channels, automod settings)
-  channels.py              # NEW — resolves each feature to a channel (configured, or auto-detected by name)
-  state.py                  # NEW — tracks which bot version was last announced
-  checks.py                # is_mod() — the permission gate mod commands use
-data/
-  warnings.json           # created automatically
-  config.json              # created automatically
-  state.json                # created automatically
-.env                    # your actual secrets (not committed)
-.env.example            # template for required env vars
-requirements.txt
+
+Activate the virtual environment, then install and configure the bot:
+
+```bash
+python -m pip install -r requirements.txt
 ```
 
-## Setup
-1. `pip install -r requirements.txt`
-2. Copy `.env.example` to `.env` and fill in `DISCORD_TOKEN`
-3. Enable **Message Content Intent** and **Server Members Intent** in the Discord Developer Portal (Bot tab)
-4. `python bot.py`
-5. In your server, an Administrator runs:
-   - `!setadminrole @Moderator` — whoever has this role can now use kick/mute/warn/clear
-   - Nothing else is required — every log channel below is auto-detected by name. Use `!channels` to see what it found, and `!setchannel` to override any of them.
+Copy `.env.example` to `.env` and set the required values:
 
-## Channel routing
-The bot no longer dumps everything into one or two channels. Each feature below is auto-detected by channel name (case-insensitive substring match), so it works with zero setup if your channel names look like the ones in your server:
+```dotenv
+DISCORD_TOKEN=your-discord-bot-token
+OWNER_ID=your-discord-user-id
+GROQ_API_KEY=your-groq-api-key
 
-| Feature | Auto-detected from a channel name containing... | What goes there |
-|---|---|---|
-| `welcome` | `welcome` | Public join message + the bot's DM to new members |
-| `logs` | `logs` / `log` | Member joins (audit) and **leaves** (moved out of #welcome) |
-| `modlog` | `mod-commands` | warn / clearwarns / clear / lock / unlock / slowmode, plus admin-config changes (setadminrole etc.) |
-| `kickban` | `kicks-bans-mutes` | kick / mute / unmute |
-| `automod` | `malcious-activity` (also matches `malicious-activity`) | Automod flags (spam, mass mentions, invite links) |
-| `updates` | `updates` | Version/changelog announcements (see below) |
+# Optional: choose model IDs available to your Groq account.
+GROQ_MODEL=openai/gpt-oss-120b
+GROQ_VISION_MODEL=qwen/qwen3.8-27b
 
-To point a feature at a specific channel instead of relying on auto-detection:
+# Optional: sync slash commands to a development server immediately.
+DEV_GUILD_ID=your-test-server-id
 ```
-!setchannel modlog #my-custom-modlog
+
+Keep `.env` private. Do not commit bot tokens, API keys, or live server data. Enable **Message Content Intent** and **Server Members Intent** in the Discord Developer Portal, install the bot with the `bot` and `applications.commands` scopes, then start it:
+
+```bash
+python bot.py
 ```
-Check what's currently active any time with `!channels`.
 
-Dot receives a directory of the server's text channels, including their category, Discord topic,
-and configured bot uses. Administrators can add a plain-language purpose with
-`!setchannelpurpose #channel what belongs here` (or `/setchannelpurpose`), and remove it with
-`!clearchannelpurpose #channel`. Dot uses these details to answer questions about where things
-belong and to identify a requested destination; it asks when a purpose or destination is unclear.
+Give the bot only the Discord permissions its enabled features need. Common permissions include View Channels, Send Messages, Embed Links, Read Message History, Manage Messages, Moderate Members, Kick Members, Manage Channels, Manage Roles, and Attach Files. Some features need only a subset. The bot's role must be above members/roles it moderates and above roles it edits.
 
-Dot's `!dot` and `!review` commands can be enabled in several channels. Add each one with
-`!addcommandchannel #channel` (or `/addcommandchannel`); remove one with
-`!removecommandchannel #channel`. `!channels` lists all configured command channels.
-The existing `!setchannel commands #channel` setting remains available and resets the
-allowed command channels to that single channel.
+## First-time server setup
 
-Set the channel for requested LeetCode problems with `!setprobchannel #dsa-problems` (Administrator only).
+1. Invite the bot and confirm its role and permissions.
+2. An existing Discord Administrator runs `!setchannel commands #bot-commands` (or `/setchannel`) to enable `!dot` and `!review`. Add more channels with `!addcommandchannel`.
+3. Set up channels with recognizable names (`welcome`, `logs`, `mod-commands`, `kicks-bans-mutes`, `automod`, `updates`, `achievements`) or assign them explicitly using `/setchannel`.
+4. Configure a LeetCode problem channel with `!setprobchannel #dsa-problems` if you want problem requests posted to a dedicated channel.
+5. Optionally configure a daily task plan with `/tasksetup` and a solution screenshot channel with `/setchannel achievements #achievements`.
+6. Use `!channels` to review the active channel routing and `!help` to open Dot's interactive introduction.
 
-## Automod (new)
-Lightweight and intentionally lenient — it's meant to catch obvious spam, not police normal chatting. Mods/admins and the bot itself are always exempt.
+Dot auto-detects several channels by name if no explicit channel is saved. Explicit settings take precedence. `!channels` shows the detected or configured routes.
 
-- **Message flooding** — more than N messages in a short window gets a timeout + a flag in the automod channel (default: 5 messages / 5 seconds → 5 minute timeout)
-- **Mass mentions** — a message pinging more than N users/roles gets deleted + flagged (default: 5)
-- **Invite links** — `discord.gg/...` links get deleted + flagged (default: on)
+## Commands
 
-Configure with `!automod` (shows current settings) and:
-- `!automod toggle` — turn it fully on/off
-- `!automod spamlimit <count> <seconds>`
-- `!automod mentionlimit <max>`
-- `!automod mutetime <minutes>`
-- `!automod invites <on/off>`
+Most commands are available as both prefix commands (`!command`) and slash commands (`/command`). A few owner or task-form commands are prefix-only or slash-only as noted. In direct messages, supported commands can be typed without `!`.
 
-## Update announcements (new)
-Bump `VERSION` in `version.py` and add a bullet list under it in `CHANGELOG` whenever you ship a change, then restart the bot. On startup it compares the new version against the last one it announced and, if different, posts the changelog to the `updates` channel automatically — no manual command needed.
+### Everyday commands
 
-## Who can do what
-- **`!setadminrole @role`** — locked to real Discord **Administrator** permission only, and it does something significant: it grants that role **real server Administrator permission** via Discord itself (not just bot-command access). Anyone holding that role can then do anything in the server — ban, delete channels, change permissions — whether or not the bot is even online. Use `!revokeadminrole` to undo it (removes the Administrator permission from the role and clears the setting).
-- **`!setwelcome` / `!setchannel`** — also Administrator-only, just point features at channels, no permission changes.
-- **`!kick`, `!mute`, `!unmute`, `!warn`, `!warnings`, `!clearwarns`, `!clear`, `!lock`, `!unlock`, `!slowmode`, `!automod ...`** — usable by real Administrators, which now includes anyone holding the configured admin role.
-- Ban/unban were removed for now — easy to add back later if you want them.
-- **Bot role position matters:** for `!setadminrole` to work, your bot's own role must sit *above* the target role in Server Settings → Roles. Discord won't let a bot grant permissions to a role above its own.
+| Command | What it does |
+| --- | --- |
+| `!help` | Opens the interactive guide and command tour. |
+| `!ping` | Shows bot latency. |
+| `!serverinfo` | Shows basic information about the current server. |
+| `!userinfo [@member]` | Shows Discord account/server details and saved progress where available. |
+| `!dot <question>` | Ask Dot about coding, DSA, LeetCode, tasks, member records, server channels, or supported actions. |
+| `!review <code>` | Ask Dot for a code review focused on bugs, edge cases, and complexity. |
+| `!leet <easy|mid|hard|number> [topic] [dm]` | Fetch a random topic-filtered problem or a specific LeetCode problem. |
+| `!another [difficulty] [topic] [dm]` | Get another problem, repeating the last settings when no options are given. |
+| `!done` | Mark today's task complete in the configured task channel. |
+| `!version` | Show the running version and last announced version. |
 
-## Commands (prefix `!`, all also work as `/`)
-**Moderation** (admin role or Administrator required)
-- `!kick @user [reason]`
-- `!mute @user <minutes> [reason]` — uses Discord's native timeout
-- `!unmute @user [reason]`
-- `!warn @user [reason]`
-- `!warnings @user`
-- `!clearwarns @user`
-- `!clear <amount>` — bulk delete (max 100)
-- `!lock` / `!unlock [#channel] [reason]`
-- `!slowmode <seconds> [#channel]`
+### Server configuration
 
-**Automod** (admin role or Administrator required)
-- `!automod` — show settings
-- `!automod toggle`
-- `!automod spamlimit <count> <seconds>`
-- `!automod mentionlimit <max>`
-- `!automod mutetime <minutes>`
-- `!automod invites <on/off>`
+| Command | Access | What it does |
+| --- | --- | --- |
+| `!setchannel <type> #channel` | Administrator | Route a feature such as `commands`, `welcome`, `logs`, `modlog`, `kickban`, `automod`, `updates`, `problem`, or `achievements`. |
+| `!channels` | Members | Show current channel routes. |
+| `!setwelcome #channel` / `!welcomechannel` | Administrator / members | Set or view the welcome channel. |
+| `!setprobchannel #channel` | Administrator | Set the destination for LeetCode problem requests. |
+| `!addcommandchannel #channel` / `!removecommandchannel #channel` | Administrator | Allow or disallow Dot and code review commands in a channel. |
+| `!setchannelpurpose #channel <purpose>` / `!clearchannelpurpose #channel` | Administrator | Save or clear a short channel description Dot can use when answering routing questions. |
+| `!setadminrole @role` / `!revokeadminrole` / `!adminrole` | Administrator | Grant, revoke, or inspect the configured admin role. See the security note below. |
+| `!synccommands` | Bot owner | Sync slash commands; useful after changing commands during development. |
 
-**Admin config** (Administrator only)
-- `!setadminrole @role` — grants the role real Administrator permission
-- `!revokeadminrole` — removes it
-- `!adminrole` — show current admin role
-- `!setwelcome #channel`
-- `!setprobchannel #channel` — choose where LeetCode problems are posted
-- `!setchannel <welcome|logs|modlog|kickban|automod|updates|achievements|commands> #channel`
-- `!addcommandchannel #channel` / `!removecommandchannel #channel` — manage the channels where `!dot` and `!review` work
-- `!channels` — show all current channel routing
-- `!welcomechannel` — show current welcome channel
+> **Important:** `!setadminrole` grants the selected Discord role the platform's real **Administrator** permission. Anyone with that role can manage the whole server, independent of the bot. Assign it only to a trusted role. The bot needs Manage Roles, and its role must be positioned above the selected role. `!revokeadminrole` removes that Administrator permission from the currently configured role.
 
-**Utility** (anyone)
-- `!ping`
-- `!serverinfo`
-- `!userinfo [@user]`
-  In a server, `userinfo` also shows task completion days and streaks, unique LeetCode questions recorded, and achievement-posting streaks.
-- `!help` or `/help` DMs you an interactive tour and your available commands. The first startup of the new version sends the tour once to each human member of a configured Dot server; new members receive it when they join. Successful deliveries are saved so restarts do not resend it. Using `!help` deliberately sends it again to you.
+### Moderation
 
-**Dot AI**
-- Add `!dm` anywhere as a standalone marker in a `!dot` question to receive the answer by direct message instead of in the channel, e.g. `!dot explain binary search !dm`. The marker is removed before Dot receives the question.
-- Dot can also carry out supported Discord actions from clear natural-language requests. Anyone can ask `!dot dm me a hi` or `!dot dm me today's task`; questions asking what today's task is are answered directly from the saved schedule (never guessed). Server Administrators can create a task for today, schedule a one-off task for tomorrow, open the daily-plan setup wizard with `!dot create a fresh plan`, add a task to an existing daily bundle, DM another member, post a regular channel message, read/issue/clear warnings, kick a member, apply/remove a timeout, lock/unlock a channel, set slowmode, or clear recent messages. Tomorrow tasks use the active plan's channel/time, or the configured task time and timezone (09:00 if none is configured); they are tracked by `!done` and six-hour reminders and can be cancelled with `/taskstop` or `!dot cancel tomorrow's task`. Numbered problems use official LeetCode details. The bot checks its own Discord permissions and role hierarchy, disambiguates channel/member targets, disables message mentions, and logs moderation actions to the configured or detected log channels. Actions not in this list are not available through `!dot`.
-- Non-admins can ask Dot to DM only themselves; only an Administrator can ask Dot to DM another member. Personalization learns only from messages sent directly to `!dot`, stores aggregate tone counters (not message text), and uses existing local task/solution totals. It adds no AI calls. Use `!dot erase my memory` or `!forgetme`/`/forgetme` to clear personalization and recent Dot chat history; this does not remove task completions, streaks, or LeetCode records.
-- Tool intent examples and expected actions live in `tests/evals/dot_tool_intents.json`. Run `python -m unittest discover -v` for offline regression checks. To compare the configured model against the intent set without performing Discord actions, set `GROQ_API_KEY` and run `python -m tests.run_dot_eval`; the evaluator mocks every action tool.
+These commands require Discord Administrator permission or the configured admin role, except where Discord's own permission checks also apply. The bot itself must have the relevant permission and role position.
 
-**Daily LeetCode tasks**
-- Start `!tasksetup` or `/tasksetup` with no arguments for the tap-through wizard. Pick a channel, plan type, duration and difficulty stages from menus; set the hour, five-minute interval, and timezone with dropdowns; then select multiple LeetCode topics or leave them blank for any topic. India is the default timezone (`Asia/Kolkata`).
-- The default progression is 7 Easy days, 7 Medium days, then Hard. Set different lengths before starting a plan with `!taskstages 10 5`. Previously sent LeetCode questions won't repeat.
-- To make a plan entirely from your own tasks, choose **Custom tasks** in the wizard. Then use `/taskadd`, choose a day from the menu, and fill out the task form. Topics and the reference link are optional; you can add up to four custom tasks per day. The prefix alternative is `!taskadd <day> Title | instructions | topic1, topic2 | optional URL`.
-- Only one schedule can run at a time. While one is active, `/taskadd` can add more custom tasks to future days; these are bundled with that day's LeetCode question in one post, one reminder, and one `!done` completion. Use `/taskstop` to choose individual plan days to cancel, or stop all remaining days; cancelling a day also cancels its posted message/reminder and prevents `!dot` from presenting it as today's task.
-- Dot receives today's LeetCode and custom task details, including topics, so members can ask `!dot I'm confused about step 2 of today's task`.
-- `!done` in the configured task channel marks the current day's task complete. Six hours after posting, the bot sends one DM reminder with the question to each non-bot member who can view the task channel and hasn't used `!done`.
-- `!taskstatus` shows the schedule. An Administrator can use natural language with `!dot` (for example, `!dot cancel today's task`, `!dot cancel day 3`, `!dot cancel days 3 and 4`, or `!dot stop all remaining tasks`) or use `/taskstop` for the selection menu. Schedule and sent-question history survive restarts.
-- Configure the solution screenshot channel with `/setchannel achievements #achievements` (the prefix form is also supported). Dot checks image attachments there using the configured Groq key and `GROQ_VISION_MODEL` (default `qwen/qwen3.8-27b`); only clearly recognized accepted LeetCode submissions with an identifiable problem are counted. Identical images and repeat problems do not increase unique question totals. `!userinfo` shows current and best streaks. Screenshot streak dates use the daily task timezone, falling back to UTC.
+| Command | What it does |
+| --- | --- |
+| `!kick @member [reason]` | Remove a member from the server. |
+| `!mute @member <minutes> [reason]` | Apply a Discord timeout. |
+| `!unmute @member [reason]` | Remove a timeout. |
+| `!warn @member [reason]` | Record a warning. |
+| `!warnings @member` | View recorded warnings. |
+| `!clearwarns @member` | Clear recorded warnings. |
+| `!clear <amount>` | Delete up to 100 recent messages from the current channel. |
+| `!lock [#channel] [reason]` / `!unlock [#channel] [reason]` | Lock or unlock a channel for `@everyone`. |
+| `!slowmode <seconds> [#channel]` | Set a channel slowmode; `0` turns it off. |
 
-**DSA practice** (anyone)
-- `!leet <easy|mid|hard|number> [topic] [dm]` — choose a random problem by difficulty/topic, or fetch an exact LeetCode number, e.g. `!leet 20`. Add a final `dm` to also send it privately, e.g. `!leet 20 dm` or `!leet mid graph dm`.
-- If the requested number is premium, the bot replies `bhadwe, question paid hai` instead of sending the problem.
-- `!another` — within five minutes of your last problem, send another at the same difficulty, topic, and DM preference. `!another <easy|mid|hard> [topic] [dm]` lets you change them.
-- `/leet` provides difficulty choices and an optional topic field; add `dm` at the end of the topic to also receive it privately. Problem statements come from LeetCode; learning topics are based on its problem tags.
-- `/another` provides the same repeat and override options.
-- Both commands work in the bot's DMs too. A direct DM request stays private; in a server, the problem is posted there by default and sent privately only when `dm` is requested.
-- Every successful problem request (`!leet` or `!another`) starts a 30-second cooldown. After five minutes, start a new request with `!leet`; `!another` expires.
-- DM commands such as `!ping`, `!userinfo`, `!version`, `!leet`, and `!another` have a 20-second gap for light commands and 30 seconds for problem fetches.
-- More than 10 DM messages or commands within one minute triggers a one-hour DM lockout. The bot sends a notice first, then skips that user's DM message and command processing during the lockout. Discord still delivers gateway events to the bot.
-- In a bot DM, you can type commands without `!`: `ping`, `leet mid graph`, or `another`. Prefix forms like `!ping` continue to work. Natural command parsing only activates when the first word is a supported DM command.
-- The bot owner can send `!reset` in the bot DM to clear their own DM cooldown and lockout, or `!reset @user` to clear another user's. Set `OWNER_ID` to your Discord user ID in `.env`.
-- The owner can send `!shutdown [reason]` in a DM to announce the pause in each server's updates channel and stop commands, automod, and join/leave messages. Only the owner can use `!start` in a DM to resume it; the bot posts a back-online notice to each updates channel.
+### Automod
 
-## Adding the DSA question feature later
-Add new command cogs following the same pattern (a `Cog` subclass + `async def setup(bot)`), then add them to `INITIAL_EXTENSIONS` in `bot.py`.
+Automod is enabled by default with lenient starting limits. Administrators and the bot are exempt from its message checks.
+
+| Command | What it does |
+| --- | --- |
+| `!automod` | Show the current settings. |
+| `!automod toggle` | Enable or disable automod. |
+| `!automod spamlimit <count> <seconds>` | Set the message-flood threshold. Defaults: 5 messages in 5 seconds. |
+| `!automod mentionlimit <max>` | Set the maximum mentions allowed in one message. Default: 5. |
+| `!automod mutetime <minutes>` | Set the timeout length for detected flooding. Default: 5 minutes. |
+| `!automod invites <on|off>` | Enable or disable Discord invite-link blocking. |
+
+## Dot, the assistant
+
+Ask naturally; for example:
+
+```text
+!dot explain binary search with a small example
+!dot what is today's task?
+!dot fetch LeetCode problem 42
+!dot what's my task streak?
+!dot how many problems has @member solved?
+!dot add "Graph practice" with instructions "Solve one graph traversal problem" on days 3 through 9
+!dot edit "Graph practice" on days 3-9 to "Graph BFS"
+!dot delete "Graph BFS" from days 3-9
+```
+
+Dot's capabilities include:
+
+- Explain programming and DSA concepts and answer follow-up questions.
+- Review submitted code for likely bugs, edge cases, and complexity.
+- Look up a member's current Discord name, username, roles, account creation date, and server join date.
+- Report saved task completion totals and task streaks, plus recorded solved-problem totals/titles and LeetCode posting streaks.
+- Answer today's task and channel-purpose questions from configured/saved data.
+- Fetch LeetCode problems via ordinary language, including exact problem numbers.
+- For Administrators: post messages, send DMs, manage supported moderation actions, open task setup, create today's or tomorrow's task, and manage named custom tasks over plan-day ranges.
+
+### Facts, permissions, and clarification
+
+- Personal/member details are answered from Discord or local records. Dot reports when information is missing; it must not invent a streak, name, profile, or other saved fact.
+- Mention the member you mean when asking about someone else. If Dot cannot identify the member unambiguously, it asks you to clarify.
+- Server actions are limited to supported tools. Dot checks requester authorization and the bot's Discord permissions, and reports a failure instead of claiming an action succeeded.
+- Anyone can ask Dot to DM themselves. Sending a DM to another member is Administrator-only.
+- For task changes, Dot asks for missing operation, day/range, task name, title, or instructions before acting. Day ranges are inclusive. Editing a posted task updates its post and restarts its completion/reminder tracking.
+- Add `!dm` as a standalone marker in a `!dot` question to receive its reply privately, for example `!dot explain binary search !dm`.
+
+### Personalization and usage
+
+- Dot's lightweight personalization uses aggregate tone counters from direct `!dot` interactions, not saved message text, and adds no extra model calls.
+- `!dot erase my memory` or `!forgetme` clears Dot personalization and recent conversation context. It does not delete task completions or LeetCode records.
+- `!dotstats` shows AI usage totals, top askers, and busiest hour since the bot last restarted.
+- `!limits` is bot-owner-only and shows remaining Groq quota information from the last request.
+- `!savage on|off` lets an Administrator choose Dot's response tone for that server.
+
+## LeetCode practice
+
+- `!leet easy arrays`, `!leet mid graph`, or `!leet hard` gets a random problem at the requested difficulty and optional topic.
+- `!leet 20` fetches a specific problem by number. Premium-only problems are not posted.
+- Add `dm` to also receive a private copy: `!leet 20 dm` or `!leet mid graph dm`.
+- `!another` repeats the previous difficulty, topic, and delivery preference. `!another hard trees` changes the options.
+- `/leet` and `/another` provide slash-command forms with interactive options. Both also work in direct messages.
+- Natural language also works: `!dot give me an easy graph problem` or `!dot fetch LeetCode problem 42`.
+- Problem content and tags are fetched from LeetCode. The configured problem channel is used for server requests; a server request stays in-channel unless `dm` is requested.
+- Successful `!leet` and `!another` requests have a 30-second cooldown. `!another` is available for five minutes after the previous problem.
+
+## Daily task plans
+
+### Start a plan
+
+An Administrator can run `/tasksetup` and use the interactive wizard, or provide the settings directly:
+
+```text
+/tasksetup channel:#daily-tasks days:30 send_time:09:00 timezone_name:Asia/Kolkata topics:arrays,graphs
+```
+
+Plans support 1–365 consecutive days, a send time and IANA timezone. The default timezone is `Asia/Kolkata`; the default LeetCode progression is 7 Easy days, then 7 Medium days, then Hard. Previously sent problems are excluded from future picks. Optionally set the Easy and Medium stage lengths with `!taskstages <easy-days> <medium-days>` before starting a plan.
+
+For a plan made only from administrator-written work, use `/taskcustomplan` or select **Custom tasks** in the setup wizard. `/taskadd` opens a form for adding tasks; the prefix form is:
+
+```text
+!taskadd <day> Title | instructions | topic1, topic2 | optional URL
+```
+
+Plans can contain up to four custom tasks per day. Custom tasks can also be combined with LeetCode plans.
+
+### Manage, complete, and cancel
+
+- Use `!taskstatus` to see the active schedule.
+- Administrators can ask `!dot` to create, edit, or delete a named custom task on one day or an inclusive range. Examples are shown in the [Dot examples](#dot-the-assistant). A range may be one day, a week, or any number of days inside the plan.
+- Dot asks for missing information before making a change. It checks that matching tasks exist across the requested range and updates existing posts when possible.
+- Use `!done` in the configured task channel to complete today's task. Repeating the command reports that the task was already recorded.
+- Members who can view the task channel receive one DM reminder six hours after posting if they have not completed the task.
+- Use `/taskstop` to select days to cancel or stop the remaining schedule. Dot also understands requests such as `!dot cancel today's task`, `!dot cancel days 3 and 4`, and `!dot stop all remaining tasks`.
+- Cancelling a task day stops reminders and prevents cancelled work from being treated as the active task. The task plan and question history persist across restarts.
+
+## Progress and achievements
+
+- Each successful `!done` records a task day and updates the member's current and best task streak.
+- Configure the achievement channel with `/setchannel achievements #achievements`. Members can post screenshots of accepted LeetCode submissions there.
+- Dot uses the configured Groq vision model to recognize clearly readable accepted submissions. It counts distinct problems, ignores duplicate images and repeat problems, and tracks posting streaks. Unclear or unidentifiable screenshots are not counted as confirmed solutions.
+- `!userinfo` and `!userinfo @member` show account details, task-day totals and streaks, unique solved problems, and solution-posting streaks in the server.
+- `!dot what's my streak?` or `!dot how many problems has @member solved?` asks about the saved records directly.
+
+## Welcome, logs, and update announcements
+
+When a member joins, Dot can post a welcome, send the interactive introduction by DM, and audit-log the join. Leaves go to the logs channel. Moderation and configuration actions are logged to the relevant configured channel where available. The bot also posts release notes in the updates channel after a version bump.
+
+Channel auto-detection recognizes names such as `welcome`, `logs`, `mod-commands`, `kicks-bans-mutes`, `automod`, `updates`, and `achievements`. Configure exact destinations with `!setchannel`, or review them with `!channels`. Dot can use a channel's name/category/topic and an optional administrator-written purpose to answer questions about where messages belong.
+
+## Privacy and saved data
+
+Dot stores server configuration, schedules, task completion records, warnings, and bot/update state in local JSON files under `data/`. Exact files are created as features are used. Keep `.env` and live `data/` private and out of public commits; keep backups of `data/` if you need to preserve progress when moving hosts.
+
+Member records include Discord IDs, available name snapshots, completed task dates, and confirmed LeetCode solution details. Dot does not collect arbitrary biographies, schools, birthdays, or locations. Erasing Dot memory only removes personalization and recent Dot chat context; it does not erase activity records. Treat the local `data/` directory as private operational data.
+
+## Updates and releases
+
+`version.py` contains `VERSION` and the version-keyed `CHANGELOG`. Add a new version and its user-facing notes when preparing a release. On startup, Dot posts the matching changelog to each server's updates channel if that version has not been announced yet. The bot owner can use `!checkupdate` to force a resend and see delivery results. `!version` reports the running and last-announced versions.
+
+## Development
+
+```bash
+python -m pip install -r requirements.txt
+python -m unittest discover -v
+```
+
+The tests are offline and do not connect to Discord. To run the optional live intent evaluation, set `GROQ_API_KEY` and run `python -m tests.run_dot_eval`; its Discord action tools are mocked.
+
+Useful project layout:
+
+```text
+bot.py                 Discord bot entry point and extension loading
+cogs/                  Commands and feature modules
+utils/                 Configuration, JSON storage, channel routing, and records
+tests/                 Offline regression tests and intent evaluation data
+data/                  Runtime JSON data (created automatically; keep private)
+.env.example           Environment-variable template
+requirements.txt       Python dependencies
+version.py             Running version and update announcement notes
+```
+
+## Owner controls
+
+The bot owner can use `!shutdown [reason]` in a direct message to pause commands and announce the reason in each configured updates channel. `!start` resumes service and announces that the bot is back. Set `OWNER_ID` in `.env` to explicitly identify the owner. `!reset [@user]` is also owner-only in DMs and clears that user's DM command cooldown/lockout.

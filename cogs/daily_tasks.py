@@ -244,7 +244,7 @@ class TaskAddDayView(discord.ui.View):
     def page_text(self):
         first = self.first_day + self.page * 25
         last = min(self.total_days, first + 24)
-        return f"Choose a future plan day ({first}–{last}, page {self.page + 1}/{self.max_page + 1})."
+        return f"Choose a current or future plan day ({first}–{last}, page {self.page + 1}/{self.max_page + 1})."
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.owner_id:
@@ -1433,6 +1433,204 @@ class DailyTasks(commands.Cog):
         mode_note = "This will be combined with that day's LeetCode question in one post." if cfg.get("daily_task_type") == "leetcode" else ""
         return True, f"{saved_as} custom task for day {day}: **{title}** ({len(day_tasks)}/4). {mode_note}".strip()
 
+    def plan_management_context(self, guild_id):
+        cfg = get_guild_config(guild_id)
+        start = cfg.get("daily_task_start_date")
+        try:
+            today = datetime.now(_get_timezone(cfg.get("daily_task_timezone", "UTC"))).date()
+            start_day = date.fromisoformat(start)
+            current_day = (today - start_day).days + 1
+        except (ZoneInfoNotFoundError, TypeError, ValueError):
+            return "No valid active task-plan dates are saved. Ask the admin to configure a plan first."
+        return (
+            f"Task-plan calendar: local today is {today.isoformat()}; plan starts {start_day.isoformat()}, "
+            f"today is plan day {current_day}; plan length is {int(cfg.get('daily_task_days', 0) or 0)} days; "
+            f"timezone is {cfg.get('daily_task_timezone', 'UTC')}. For Dot's task tools, use plan-day numbers "
+            "(1-based), with start_day and end_day inclusive."
+        )
+
+    async def manage_plan_tasks(
+        self, guild, *, operation, start_day, end_day, task_title="", title="",
+        instructions="", topics=None, url="", clear_url=False, actor=None,
+    ):
+        """Create/edit/delete one named custom task across an inclusive plan-day range."""
+        async with self.guild_locks[guild.id]:
+            cfg = get_guild_config(guild.id)
+            if not cfg.get("daily_task_enabled") or not cfg.get("daily_task_start_date"):
+                return False, "There is no active plan. Start one with `/tasksetup` first."
+            if operation not in {"create", "edit", "delete"}:
+                return False, "Choose create, edit, or delete."
+            try:
+                first = int(start_day)
+                last = int(end_day)
+                plan_start = date.fromisoformat(cfg["daily_task_start_date"])
+                today = datetime.now(_get_timezone(cfg.get("daily_task_timezone", "UTC"))).date()
+            except (TypeError, ValueError, ZoneInfoNotFoundError):
+                return False, "I couldn't verify the active plan dates. Check the task schedule settings."
+            total = int(cfg.get("daily_task_days", 0) or 0)
+            if first < 1 or last < first or last > total or last - first >= 365:
+                return False, f"Choose an inclusive plan-day range from 1 to {total}, with the start day no later than the end day."
+            dates = [plan_start + timedelta(days=day - 1) for day in range(first, last + 1)]
+            if any(day_date < today for day_date in dates):
+                return False, "Past task days are locked. Choose today or future plan days."
+
+            old_title = str(task_title or "").strip()
+            new_title = str(title or "").strip()
+            new_instructions = str(instructions or "").strip()
+            url = str(url or "").strip()
+            clean_topics = [str(topic).strip()[:100] for topic in (topics or []) if str(topic).strip()][:10]
+            if operation == "create" and (not new_title or not new_instructions):
+                return False, "To create a task, provide both a title and instructions."
+            if operation in {"edit", "delete"} and not old_title:
+                return False, "Name the exact existing task title to edit or delete."
+            if operation == "edit" and not any((new_title, new_instructions, topics is not None, url, clear_url)):
+                return False, "For an edit, tell me at least one replacement field (title, instructions, topics, or link)."
+            if operation in {"create", "edit"}:
+                final_title = new_title or old_title
+                if not final_title or len(final_title) > 80 or len(new_instructions) > 500:
+                    return False, "Keep task titles under 80 characters and instructions under 500 characters."
+                try:
+                    parsed_url = urlsplit(url) if url else None
+                except ValueError:
+                    return False, "The task link is malformed."
+                if url and (len(url) > 2000 or parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc):
+                    return False, "Use a valid http:// or https:// task link."
+
+            state = _load_state()
+            guild_state = state["guilds"].setdefault(str(guild.id), {"tasks": {}})
+            records = guild_state.setdefault("tasks", {})
+            configured = dict(cfg.get("daily_task_custom_tasks", {}))
+            staged = []
+            missing = []
+            for day_number, day_date in zip(range(first, last + 1), dates):
+                key = day_date.isoformat()
+                record = records.get(key, {})
+                if record.get("cancelled_at"):
+                    missing.append(day_number)
+                    continue
+                posted = bool(record.get("sent_at"))
+                if posted:
+                    bundle = record.get("task") or {}
+                    custom = list(bundle.get("custom_tasks", []))
+                    primary = dict(bundle)
+                    primary["_dot_primary"] = True
+                    entries = [primary] + [dict(item) for item in custom]
+                else:
+                    saved = configured.get(str(day_number), [])
+                    entries = [dict(saved)] if isinstance(saved, dict) else [dict(item) for item in saved]
+                    bundle = None
+                if operation == "create":
+                    custom_count = sum(not item.get("_dot_primary") for item in entries)
+                    max_custom = 3 if posted and bundle.get("difficulty") == "CUSTOM" else 4
+                    if custom_count >= max_custom:
+                        return False, f"Day {day_number} already has the maximum of four custom tasks."
+                    if any(item.get("title", "").casefold() == new_title.casefold() for item in entries):
+                        return False, f"Day {day_number} already has a task titled **{new_title}**."
+                    entry = {"title": new_title, "statement": new_instructions, "topics": clean_topics, "url": url}
+                    entries.append(entry)
+                else:
+                    matches = [index for index, item in enumerate(entries) if item.get("title", "").casefold() == old_title.casefold()]
+                    if len(matches) != 1:
+                        missing.append(day_number)
+                        continue
+                    index = matches[0]
+                    if operation == "delete":
+                        entries.pop(index)
+                    else:
+                        if new_title and any(
+                            offset != index and item.get("title", "").casefold() == new_title.casefold()
+                            for offset, item in enumerate(entries)
+                        ):
+                            return False, f"Day {day_number} already has another task titled **{new_title}**."
+                        entry = entries[index]
+                        if new_title:
+                            entry["title"] = new_title
+                        if new_instructions:
+                            entry["statement"] = new_instructions
+                        if topics is not None:
+                            entry["topics"] = clean_topics
+                        if url:
+                            entry["url"] = url
+                        elif clear_url:
+                            entry["url"] = ""
+                staged.append((day_number, key, record, posted, bundle, entries))
+
+            if missing:
+                missing_list = ", ".join(str(day) for day in missing[:20])
+                return False, f"I couldn't find exactly one matching active task on plan day(s) {missing_list}. No changes were made; check the day range and exact current task title."
+
+            # Resolve every already-published message before editing any of
+            # them. This avoids half-applying a multi-day change because a
+            # later day's post was deleted or became inaccessible.
+            posted_messages = {}
+            for day_number, _key, record, posted, _bundle, _entries in staged:
+                if not posted:
+                    continue
+                destination = guild.get_channel(record.get("channel_id") or cfg.get("daily_task_channel_id"))
+                if destination is None or not record.get("message_id"):
+                    return False, f"I can't update the already-posted task for plan day {day_number}: its channel or post is unavailable. No changes were made."
+                try:
+                    posted_messages[day_number] = await destination.fetch_message(record["message_id"])
+                except discord.HTTPException:
+                    logger.exception("Could not fetch task post for guild %s day %s", guild.id, day_number)
+                    return False, f"I couldn't access the posted task for plan day {day_number}; no changes were made. Check bot permissions and try again."
+
+            changed_posts = []
+            for day_number, key, record, posted, bundle, entries in staged:
+                if not posted:
+                    configured[str(day_number)] = entries
+                    continue
+                primary = next((item for item in entries if item.get("_dot_primary")), None)
+                extras = [{key: value for key, value in item.items() if key != "_dot_primary"} for item in entries if not item.get("_dot_primary")]
+                if primary:
+                    bundle.update({key: value for key, value in primary.items() if key != "_dot_primary"})
+                    bundle["custom_tasks"] = extras
+                elif extras:
+                    promoted, *extras = extras
+                    bundle = {**promoted, "difficulty": "CUSTOM", "day": day_number, "custom_tasks": extras}
+                else:
+                    bundle = None
+                try:
+                    message = posted_messages[day_number]
+                    if bundle is None:
+                        await message.edit(content=f"🚫 Day {day_number} task removed by an administrator.", embed=None, view=None, allowed_mentions=discord.AllowedMentions.none())
+                        record["cancelled_at"] = datetime.now(timezone.utc).isoformat()
+                        record["reminder_complete"] = True
+                    else:
+                        await message.edit(content=None, embed=_task_embed(bundle), allowed_mentions=discord.AllowedMentions.none())
+                        record["task"] = bundle
+                        record["completed_ids"] = []
+                        record["reminded_ids"] = []
+                        record["reminder_complete"] = False
+                        record["sent_at"] = datetime.now(timezone.utc).isoformat()
+                    changed_posts.append(day_number)
+                except discord.HTTPException:
+                    logger.exception("Could not edit task post for guild %s day %s", guild.id, day_number)
+                    return False, f"I couldn't update the posted task for plan day {day_number}; check bot permissions and try again."
+
+            if operation != "delete":
+                set_guild_value(guild.id, "daily_task_custom_tasks", configured)
+            else:
+                for day_number, key, record, posted, bundle, entries in staged:
+                    if not posted:
+                        if entries:
+                            configured[str(day_number)] = entries
+                        else:
+                            configured.pop(str(day_number), None)
+                set_guild_value(guild.id, "daily_task_custom_tasks", configured)
+            _save_state(state)
+            today_plan_day = (today - plan_start).days + 1
+            if any(day_number == today_plan_day and not posted for day_number, _key, _record, posted, _bundle, _entries in staged):
+                try:
+                    local_now = datetime.now(_get_timezone(cfg.get("daily_task_timezone", "UTC")))
+                except (ZoneInfoNotFoundError, TypeError):
+                    local_now = datetime.now(timezone.utc)
+                await self.maybe_post_task(guild, get_guild_config(guild.id), guild_state, state, local_now, force=True)
+            action = {"create": "Added", "edit": "Updated", "delete": "Deleted"}[operation]
+            scope = f"day {first}" if first == last else f"days {first}–{last}"
+            posted_note = f" Updated {len(changed_posts)} already-posted day(s); their !done status and reminder timer restarted." if changed_posts else ""
+            return True, f"{action} the task for {scope}.{posted_note}"
+
     @app_commands.command(name="taskadd", description="Open a form to add a custom task to a future plan day.")
     @app_commands.guild_only()
     @app_commands.checks.has_permissions(administrator=True)
@@ -1559,10 +1757,15 @@ class DailyTasks(commands.Cog):
         if not record or not record.get("sent_at"):
             return await ctx.send("There isn't a daily task posted today yet.", ephemeral=True)
         completed = set(record.get("completed_ids", []))
+        if ctx.author.id in completed or str(ctx.author.id) in completed:
+            return await ctx.send("You already marked today's task complete. ✅", ephemeral=True)
         completed.add(ctx.author.id)
         record["completed_ids"] = list(completed)
         _save_state(state)
-        record_task_completion(ctx.guild.id, ctx.author.id, today)
+        record_task_completion(
+            ctx.guild.id, ctx.author.id, today,
+            username=ctx.author.name, display_name=ctx.author.display_name,
+        )
         await ctx.send(f"✅ {ctx.author.mention} marked today's task done!", allowed_mentions=discord.AllowedMentions.none())
 
 
